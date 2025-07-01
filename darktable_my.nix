@@ -17,8 +17,7 @@ self: super: {
         src = fetchGit {
           url = "https://github.com/darktable-org/darktable";
           ref = "master";
-#          rev = "d2f15c8d1da5bb9b72cb554f9f606db953fb75ed";
-                    rev = "cf3e972fb05d433a7764ee661850182ba456e128";
+#                    rev = "cf3e972fb05d433a7764ee661850182ba456e128";
           submodules = true;
           #              allRefs = true;
         };
