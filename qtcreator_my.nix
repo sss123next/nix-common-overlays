@@ -1,6 +1,6 @@
 { inputs }:
 self: super: {
-  qtcreatore_my =
+  qtcreator_my =
     let
       #      pkgsmaster = import inputs.nixpkgsmaster { };
     in
