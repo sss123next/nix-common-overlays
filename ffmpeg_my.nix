@@ -42,8 +42,8 @@ self: super: {
         src = fetchGit {
           url = "https://git.ffmpeg.org/ffmpeg.git";
           ref = "master";
-#          rev = "5fea5e3e11d6ff425db48f44489916399822aece";
-                              rev = "9ad6dca28ccbe989f615fb10626b22236b06df59";
+          rev = "6b028859d969f887d89b6458a92f92f5031c69c8";
+#                              rev = "9ad6dca28ccbe989f615fb10626b22236b06df59";
           allRefs = true;
         };
         configureFlags =

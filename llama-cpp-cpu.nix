@@ -12,7 +12,8 @@ self: super: {
       (old: rec {
         version = "git";
         src = fetchGit {
-          url = "https://github.com/ggerganov/llama.cpp";
+#          url = "https://github.com/ggerganov/llama.cpp";
+          url = "https://github.com/ikawrakow/ik_llama.cpp";
           ref = "master";
           submodules = true;
           #            rev = "";
