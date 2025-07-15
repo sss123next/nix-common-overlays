@@ -10,7 +10,7 @@ self: super: {
       stdenv = llvmPackages.stdenv;
       exiv2 = self.exiv2_my;
       libaom = self.libaom_my;
-      libavif = self.libavif_my;
+#      libavif = self.libavif_my;
     }).overrideAttrs
       (old: rec {
         version = "git";
