@@ -12,8 +12,7 @@ self: super: {
         src = fetchGit {
           url = "https://github.com/AOMediaCodec/libavif";
           ref = "main";
-#          rev = "048488e0588b0543d122ec95ac1a4f54cc73285a";
-                                  rev = "963c4bb918bee37cf1ccbd81efa5d8cf530647cf";
+          rev = "a4fec908b582fd7b82c86014a68e54dc5e0f4058";
         };
         cmakeFlags = oldAttrs.cmakeFlags ++ [ "-DAVIF_LIBYUV_ENABLED=ON" ];
         patches = [];
