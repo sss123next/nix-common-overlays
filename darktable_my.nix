@@ -10,14 +10,14 @@ self: super: {
       stdenv = llvmPackages.stdenv;
       exiv2 = self.exiv2_my;
       libaom = self.libaom_my;
-#      libavif = self.libavif_my;
+      libavif = self.libavif_my;
     }).overrideAttrs
       (old: rec {
         version = "git";
         src = fetchGit {
           url = "https://github.com/darktable-org/darktable";
           ref = "master";
-          rev = "d2f15c8d1da5bb9b72cb554f9f606db953fb75ed";
+#          rev = "d2f15c8d1da5bb9b72cb554f9f606db953fb75ed";
           submodules = true;
         };
         #            nativeBuildInputs = old.nativeBuldInputs ++ [
