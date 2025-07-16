@@ -26,6 +26,7 @@ self: super: {
         #clang pkg-config
         #intltool perl desktop-file-utils wrapGAppsHook gsettings-desktop-schemas
         #           ];
+        cmakeFlags = old.cmakeFlags ++ [ "-DUSE_AVIF=OFF" ]; #fuck
         nativeBuildInputs = old.nativeBuildInputs ++ [
           git
           po4a

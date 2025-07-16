@@ -156,6 +156,7 @@ mod: orig: {
         flac
         freeglut
         libjpeg
+        libjxl
         libpng
         libpng12
         libsamplerate
