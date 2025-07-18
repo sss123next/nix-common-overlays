@@ -157,6 +157,7 @@ mod: orig: {
         freeglut
         libjpeg
         libjpeg8
+        libavif
         libjxl
         libpng
         libpng12
