@@ -158,6 +158,7 @@ mod: orig: {
         libjpeg
         libjpeg8
         libavif
+        libwebp
         libjxl
         libpng
         libpng12
