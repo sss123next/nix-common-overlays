@@ -173,6 +173,9 @@ mod: orig: {
         SDL_mixer
         SDL2_ttf
         SDL2_mixer
+        sdl3
+        sdl3-image
+        sdl3-ttf
         libappindicator-gtk2
         libdbusmenu-gtk2
         libindicator-gtk2
