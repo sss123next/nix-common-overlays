@@ -14,7 +14,8 @@ self: super: {
         src = fetchGit {
 #          url = "https://github.com/ggerganov/llama.cpp";
 #          ref = "master";
-          url = "https://github.com/ikawrakow/ik_llama.cpp";
+#          url = "https://github.com/ikawrakow/ik_llama.cpp";
+          url = "http://git.dark-alexandr.net/ik_llama.cpp.git";
           ref = "main";
           submodules = true;
           #            rev = "";
