@@ -13,8 +13,7 @@ self: super: {
         src = fetchGit {
           url = "https://github.com/ImageMagick/ImageMagick";
           ref = "main";
-#          rev = "d3678bd5b8f25846037f00d21aa6a75a3e8f5e87";
-                    rev = "d7992582b93ef4e6f9ab2201a1cfbba43055a270";
+          rev = "305e383c8ac7b30bc2ee96ab8c43ec96217ec2a9";
         };
         configureFlags = old.configureFlags ++ [
           "--with-fftw"
