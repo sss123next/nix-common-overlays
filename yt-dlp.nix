@@ -24,6 +24,34 @@ self: super: {
         websockets
         requests
         urllib3
+        (shiton3.pkgs.buildPythonPackage {
+          pname = "bgutil-ytdlp-pot-provider-plugin";
+          version = "git";
+          pyproject = true;
+          src = fetchGit {
+            url = "https://github.com/Brainicism/bgutil-ytdlp-pot-provider";
+            ref = "master";
+          };
+          preBuild = ''
+            cd plugin
+          '';
+          nativeBuildInputs = [ hatchling ];
+          propagatedBuildInputs = [
+            brotli
+            certifi
+            mutagen
+            pycryptodomex
+            websockets
+            requests
+            urllib3
+          ];
+
+          meta = with lib; {
+            homepage = "https://github.com/Brainicism/bgutil-ytdlp-pot-provider";
+            description = "A proof-of-origin token (POT) provider yt-dlp";
+            license = licenses.gpl3;
+          };
+        })
       ];
       makeWrapperArgs =
         let
