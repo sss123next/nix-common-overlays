@@ -6,7 +6,7 @@ self: super: {
     in
     with super;
     (qtcreator.overrideAttrs (old: rec {
-       version = "2025_07_23";
+      version = "2025_07_23";
       src = fetchGit {
         url = "https://github.com/qt-creator/qt-creator";
         ref = "master";

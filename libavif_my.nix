@@ -15,6 +15,6 @@ self: super: {
           rev = "a4fec908b582fd7b82c86014a68e54dc5e0f4058";
         };
         cmakeFlags = oldAttrs.cmakeFlags ++ [ "-DAVIF_LIBYUV_ENABLED=ON" ];
-        patches = [];
+        patches = [ ];
       });
 }

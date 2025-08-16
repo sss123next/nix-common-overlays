@@ -7,8 +7,8 @@ self: super: {
       src = fetchGit {
         url = "https://github.com/Exiv2/exiv2";
         ref = "main";
-                      rev = "316cb55574b33d8d4b3e3c240bf3f9e881135e52";
-#        rev = "4af576c067b72a1968066202eec1ddb577383a63";
+        rev = "316cb55574b33d8d4b3e3c240bf3f9e881135e52";
+        #        rev = "4af576c067b72a1968066202eec1ddb577383a63";
       };
       buildInputs = oldAttrs.buildInputs ++ [
         brotli

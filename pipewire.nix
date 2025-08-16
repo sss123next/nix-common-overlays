@@ -9,13 +9,12 @@ self: super: {
       x11Support = false;
     }).overrideAttrs
       (old: rec {
-        version = "git";
+        version = "2025-08-13-git";
         name = "pipewire";
         src = fetchGit {
           url = "https://gitlab.freedesktop.org/pipewire/pipewire";
           ref = "master";
-#          rev = "2771c435fdc9b751c00c57dc48d83069e3fe7396";
-                              rev = "4f3a2d723b617e278efc82835baa93f65d756fa4";
+          rev = "e8ae244b2b656b32eeac257ed4c2e87e43435c44";
         };
 
         postUnpack = ''
@@ -44,7 +43,7 @@ self: super: {
           (lib.mesonEnable "avahi" false)
           (lib.mesonEnable "gstreamer" true)
           (lib.mesonEnable "gstreamer-device-provider" true)
-          (lib.mesonEnable "systemd" true)
+          (lib.mesonEnable "onnxruntime" false)
           (lib.mesonEnable "systemd-system-service" true)
           (lib.mesonEnable "udev" false)
           (lib.mesonEnable "ffmpeg" true)

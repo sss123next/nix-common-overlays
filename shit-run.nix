@@ -111,12 +111,12 @@ mod: orig: {
         xorg.libSM
         xorg.libICE
         pkgs2505.gnome2.GConf
-#        (gnome2.GConf.overrideAttrs (
-#          old: rec {
-#            nativeBuildInputs = old.nativeBuildInputs ++ [ python3Packages.2to3 ];
-#          }
-#          )
-#        )
+        #        (gnome2.GConf.overrideAttrs (
+        #          old: rec {
+        #            nativeBuildInputs = old.nativeBuildInputs ++ [ python3Packages.2to3 ];
+        #          }
+        #          )
+        #        )
         curlWithGnuTls
         nspr
         nss

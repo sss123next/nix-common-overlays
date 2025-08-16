@@ -7,8 +7,8 @@ self: super: {
       src = fetchGit {
         url = "https://github.com/strukturag/libheif";
         ref = "master";
-                rev = "e0bfb132ab984ad3d7703b5183a9fb336d96f8a0";
-       # rev = "3d66463504385ba8b9ab70b0a6d9d7e6d392a4d9";
+        rev = "e0bfb132ab984ad3d7703b5183a9fb336d96f8a0";
+        # rev = "3d66463504385ba8b9ab70b0a6d9d7e6d392a4d9";
       };
       nativeBuildInputs = [
         pkg-config

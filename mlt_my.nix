@@ -16,7 +16,16 @@ self: super: {
           url = "https://github.com/mltframework/mlt";
           ref = "master";
         };
-        buildInputs = with qt6Packages; old.buildInputs ++ [ gdk-pixbuf libebur128 qtbase qtsvg qt5compat ];
+        buildInputs =
+          with qt6Packages;
+          old.buildInputs
+          ++ [
+            gdk-pixbuf
+            libebur128
+            qtbase
+            qtsvg
+            qt5compat
+          ];
         nativeBuildInputs = with qt6Packages; old.nativeBuildInputs ++ [ wrapQtAppsNoGuiHook ];
       });
 }

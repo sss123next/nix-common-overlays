@@ -17,7 +17,7 @@ self: super: {
         src = fetchGit {
           url = "https://github.com/darktable-org/darktable";
           ref = "master";
-#          rev = "d2f15c8d1da5bb9b72cb554f9f606db953fb75ed";
+          #          rev = "d2f15c8d1da5bb9b72cb554f9f606db953fb75ed";
           submodules = true;
         };
         #            nativeBuildInputs = old.nativeBuldInputs ++ [
@@ -25,7 +25,7 @@ self: super: {
         #clang pkg-config
         #intltool perl desktop-file-utils wrapGAppsHook gsettings-desktop-schemas
         #           ];
-#        cmakeFlags = old.cmakeFlags ++ [ "-DUSE_AVIF=OFF" ]; # fuck
+        #        cmakeFlags = old.cmakeFlags ++ [ "-DUSE_AVIF=OFF" ]; # fuck
         nativeBuildInputs = old.nativeBuildInputs ++ [
           git
           po4a

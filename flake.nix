@@ -1,19 +1,22 @@
 {
-  outputs = { self }:
+  outputs =
+    { self }:
     let
-      nixFiles = builtins.filter
-        (f: f != "flake.nix" && builtins.match ".*\\.nix" f != null)
-        (builtins.attrNames (builtins.readDir ./.));
+      nixFiles = builtins.filter (f: f != "flake.nix" && builtins.match ".*\\.nix" f != null) (
+        builtins.attrNames (builtins.readDir ./.)
+      );
 
       makeOverlay = file: {
         name = builtins.replaceStrings [ ".nix" ] [ "" ] file;
-        value = inputs: (import (./. + "/${file}") {
-          inherit inputs;
-        });
+        value =
+          inputs:
+          (import (./. + "/${file}") {
+            inherit inputs;
+          });
       };
 
-    in {
+    in
+    {
       overlays = builtins.listToAttrs (map makeOverlay nixFiles);
     };
 }
-

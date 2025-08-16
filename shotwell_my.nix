@@ -1,7 +1,7 @@
 { inputs }:
-  let
-#    oldpkgs = import inputs.nixpkgs2411 { };
-  in
+let
+  #    oldpkgs = import inputs.nixpkgs2411 { };
+in
 self: super: {
   shotwell_my =
     with super;
@@ -12,7 +12,7 @@ self: super: {
         ref = "master";
         #                rev = "59a38897bf28cba9ef787840dac72e4647510bbb";
       };
-#      nativeBuildInputs = old.nativeBuildInputs ++ [ cmake pkg-config ];
+      #      nativeBuildInputs = old.nativeBuildInputs ++ [ cmake pkg-config ];
       buildInputs = [
         gtk4
         libexif
