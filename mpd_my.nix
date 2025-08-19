@@ -20,8 +20,7 @@ self: super: {
           src = fetchGit {
             url = "https://github.com/MusicPlayerDaemon/MPD";
             ref = "master";
-            # rev = "bee9565384761634df5859d144fee60cb4208453";
-            rev = "287033c361c45b83adf3caf1e4827868561db9a3";
+#            rev = "287033c361c45b83adf3caf1e4827868561db9a3";
           };
           buildInputs = oldAttrs.buildInputs ++ [ soxr ];
           mesonFlags = oldAttrs.mesonFlags ++ [
