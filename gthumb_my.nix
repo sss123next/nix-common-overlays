@@ -26,7 +26,7 @@ self: super: {
 
       buildInputs = [
         clutter-gtk
-#        self.exiv2_my
+        self.exiv2_my
         glib
         adwaita-icon-theme
         gsettings-desktop-schemas
