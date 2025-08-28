@@ -29,7 +29,9 @@ self: super: {
         cmakeFlags = old.cmakeFlags ++ [
           "-DGGML_VULKAN:BOOL=FALSE"
           "-DGGML_BLAS:BOOL=TRUE"
-          "-DGGML_CPU_AARCH64=OFF"
+          "-DLLAMA_BUILD_SERVER:BOOL=TRUE"
+          "-DLLAMA_STANDALONE:BOOL=TRUE"
+#          "-DGGML_CPU_AARCH64=OFF"
           #            "-DGGML_SYCL:BOOL=TRUE"
           #            "-DGGML_SYCL_F16:BOOL=TRUE"
         ];
