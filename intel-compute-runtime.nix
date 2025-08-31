@@ -3,7 +3,7 @@
   intel-compute-runtime =
     with super;
     intel-compute-runtime.overrideAttrs (oldAttrs: rec {
-      version = "25.22.33944.9";
+      version = "25.22.33944.13";
       #      version = "25.18.33578.11";
       src = fetchFromGitHub {
         owner = "intel";
