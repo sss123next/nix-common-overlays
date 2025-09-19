@@ -9,6 +9,6 @@ self: super: {
         ref = "main";
         #        rev = "0d77b4895ad5f1bb3b0ee43103a5246c58b65591";
       };
-      buildInputs = old.buildInputs ++ [ libspng pangocairo ];
+      buildInputs = old.buildInputs ++ [ libspng pango cairo ];
     });
 }
