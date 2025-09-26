@@ -24,5 +24,6 @@ self: super: {
         buildInputs = oldAttrs.buildInputs ++ [
           gsettings-desktop-schemas
         ];
+        patches = [];
       });
 }
