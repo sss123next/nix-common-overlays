@@ -60,7 +60,7 @@ self: super: {
         buildInputs = oldAttrs.buildInputs ++ [
           self.libvpl
           shaderc
-          lcevcdec
+          self.lcevcdec_my
         ];
         patches = [ ];
         postPatch = "";
