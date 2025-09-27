@@ -46,21 +46,21 @@ self: super: {
           allRefs = true;
         };
         configureFlags =
-          (lib.lists.remove "--enable-postproc" (
+          (lib.lists.remove "--enable-liblcevc-dec" (lib.lists.remove "--enable-postproc" (
             lib.lists.remove "--enable-avresample" (
               lib.lists.remove "--disable-avresample" oldAttrs.configureFlags
             )
-          ))
+          )))
           ++ [
             "--enable-libvpl"
             "--disable-hardcoded-tables"
             "--enable-lto=thin"
+            "--disable-liblcevc-dec"
           ];
         nativeBuildInputs = oldAttrs.nativeBuildInputs ++ [ nasm ];
         buildInputs = oldAttrs.buildInputs ++ [
           self.libvpl
           shaderc
-          self.lcevcdec_my
         ];
         patches = [ ];
         postPatch = "";
