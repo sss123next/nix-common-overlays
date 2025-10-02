@@ -12,6 +12,7 @@ self: super: {
           ref = "master";
           #              submodules = true;
         };
+        buildInputs = old.buildInputs ++ [ qt6Packages.qtwebsockets ];
         patches = [ ];
       });
 }
