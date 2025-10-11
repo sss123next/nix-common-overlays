@@ -10,5 +10,6 @@ self: super: {
         #       rev = "ef202bcff8cce0e208e244e453d62dcad4c350ca";
       };
       nativeBuildInputs = old.nativeBuildInputs ++ [ xxHash ];
+      patches = [];
     });
 }
