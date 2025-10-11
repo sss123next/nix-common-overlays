@@ -10,6 +10,7 @@ self: super: {
       };
       patches = [ ];
       cmakeFlags = oldAttrs.cmakeFlags ++ [
+        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5" #fuck
         "-DENABLE_PRODUCTION_KMD=ON"
         "-DENABLE_KERNELS=ON"
         "-DENABLE_NONFREE_KERNELS=ON"
