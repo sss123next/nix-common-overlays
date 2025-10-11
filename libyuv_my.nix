@@ -10,5 +10,6 @@ self: super: {
         rev = "5fb6c8cbe3a68d4c74f0e3166bdc33623cc5f8fe";
       };
       patches = [ ];
+      cmakeFlags = old.cmakeFlags ++ ["-DCMAKE_POLICY_VERSION_MINIMUM=3.5"];
     });
 }
