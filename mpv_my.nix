@@ -14,7 +14,7 @@ self: super: {
       drmSupport = true;
       vulkanSupport = true;
       waylandSupport = true;
-      x11Support = true;
+#      x11Support = true;
       cddaSupport = true;
       pulseSupport = false;
       openalSupport = false;
