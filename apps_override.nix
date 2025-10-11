@@ -26,6 +26,7 @@ self: super: {
         rev = "13cafedf59369db478af537fb909f0d7fd0eb85f";
         sha256 = "sha256-4GIPj8so7POEwxKZzFBoJTu76XKbGHYmXC/ILeo0dVE=";
       };
+      buildInputs = oldAttrs.buildInputs ++ [ cmake ];
       cmakeFlags =  ["-DCMAKE_POLICY_VERSION_MINIMUM=3.5"];
     }));
   x11spice =
