@@ -3,7 +3,7 @@ self: super: {
   shotcut-git =
     with super;
     (shotcut.override {
-      mlt = self.mlt_my;
+      qt6Packages.mlt = self.mlt_my;
     }).overrideAttrs
       (old: rec {
         version = "00.00.00";
