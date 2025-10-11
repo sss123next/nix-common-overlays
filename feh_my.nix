@@ -3,7 +3,7 @@ self: super: {
   feh_my =
     with super;
     (feh.override {
-      imlib2 = imlib2Full.override {
+      imlib2Full = imlib2Full.override {
         heifSupport = true;
         webpSupport = true;
         svgSupport = true;
