@@ -4,7 +4,7 @@ self: super: rec {
     with super;
     python3.override {
       bluezSupport = false;
-      x11Support = false;
+ #     x11Support = false;
       #      enableGIL = false;
       stripTests = true;
       enableOptimizations = true;
