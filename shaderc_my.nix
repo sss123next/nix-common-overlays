@@ -56,7 +56,9 @@ self: super: {
         moveToOutput "lib/*.a" $static
       '';
 
-      cmakeFlags = [ "-DSHADERC_SKIP_TESTS=ON" ];
+      cmakeFlags = [ "-DSHADERC_SKIP_TESTS=ON"
+      "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+    ];
 
       # Fix the paths in .pc, even though it's unclear if all these .pc are really useful.
       postFixup = ''
