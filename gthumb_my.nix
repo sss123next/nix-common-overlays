@@ -21,7 +21,7 @@ self: super: {
         ninja
         pkg-config
         python3
-        wrapGAppsHook
+        wrapGAppsHook3
       ];
 
       buildInputs = [

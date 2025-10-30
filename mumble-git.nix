@@ -17,7 +17,7 @@ self: super: {
         python3
         wrapQtAppsHook
         qttools
-        wrapGAppsHook
+        wrapGAppsHook3
       ];
       buildInputs = with qt6Packages; [
         avahi-compat

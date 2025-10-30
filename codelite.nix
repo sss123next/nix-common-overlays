@@ -18,7 +18,7 @@ self: super: {
       nativeBuildInputs = [
         cmake
         pkg-config
-        wrapGAppsHook
+        wrapGAppsHook3
         which # required for cmake script
       ];
       buildInputs = [
