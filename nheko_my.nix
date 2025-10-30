@@ -20,7 +20,7 @@ self: super: {
           ref = "master";
           #                  rev = "d95d2fcaa9e3b8ab47275d2bf56e5a7ebddd37e7";
         };
-        nativeBuildInputs = oldAttrs.nativeBuildInputs ++ [ wrapGAppsHook ];
+        nativeBuildInputs = oldAttrs.nativeBuildInputs ++ [ wrapGAppsHook3 ];
         buildInputs = oldAttrs.buildInputs ++ [
           gsettings-desktop-schemas
         ];
