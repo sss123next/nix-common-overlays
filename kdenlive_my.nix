@@ -28,6 +28,7 @@ self: super: {
           #          with qt6Packages;
           #          with kdePackages;
           [
+            kddockwidgets
             #        ffmpeg_my
             #            wrapQtAppsHook
             # cmake
