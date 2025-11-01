@@ -14,11 +14,9 @@ self: super: {
       drmSupport = true;
       vulkanSupport = true;
       waylandSupport = true;
-#      x11Support = true;
       cddaSupport = true;
       pulseSupport = false;
       openalSupport = false;
-      sdl2Support = false;
       vaapiSupport = true;
       vapoursynthSupport = false;
       vdpauSupport = false;
@@ -38,14 +36,14 @@ self: super: {
       });
       libplacebo = self.libplacebo_my;
     }).overrideAttrs
-      (oldAttrs: rec {
+      (old: rec {
         version = "git";
         src = fetchGit {
           url = "https://github.com/mpv-player/mpv";
           ref = "master";
           #              rev = "c50f536bd1ac1f8154d2b1dcaccd25ab150b414a";
         };
-        buildInputs = oldAttrs.buildInputs ++ [
+        buildInputs = old.buildInputs ++ [
           xorg.libXpresent
           zlib
           lcms2
@@ -71,7 +69,16 @@ self: super: {
           ''
         ];
         patches = [ ];
-        mesonFlags = oldAttrs.mesonFlags ++ [
+        mesonFlags =
+        #old.mesonFlags ++
+        [
+            (lib.mesonOption "default_library" "shared") 
+    (lib.mesonBool "libmpv" true) 
+    (lib.mesonEnable "manpage-build" true) 
+    (lib.mesonEnable "cdda" old.cddaSupport) 
+    (lib.mesonEnable "dvbin" old.dvbinSupport) 
+    (lib.mesonEnable "dvdnav" old.dvdnavSupport) 
+    (lib.mesonEnable "openal" old.openalSupport) 
           (lib.mesonOption "cuda-hwaccel" "disabled")
           (lib.mesonOption "cuda-interop" "disabled")
         ];
