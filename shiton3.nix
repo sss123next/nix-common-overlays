@@ -17,7 +17,7 @@ self: super: rec {
             patches = [ ];
             src = fetchPypi {
               inherit pname version;
-              hash = "sha256-VTZUF3NOsYJVWQqf+euX6eHaho1MzWQCOZ6vaK8gp2A=";
+              hash = "sha256-27oLrFbhAIU9sOpxuCtN/V/iv203VKiJPDr1AM7H188=";
             };
           });
 
@@ -42,7 +42,7 @@ self: super: rec {
               owner = "aaugustin";
               repo = pname;
               rev = "refs/tags/${version}";
-              hash = "sha256-eyNLKXSfC204bF9Zu6uvH7+XZpy3XyvuOSNlwoJTNq8=";
+              hash = "sha256-DC1nK+TvCoCqchyWJOyT4Ul4gkTYXixu7XmTqvytqEo=";
             };
           });
 
