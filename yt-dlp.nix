@@ -24,6 +24,7 @@ self: super: {
         websockets
         requests
         urllib3
+        quickjs
         (shiton3.pkgs.buildPythonPackage {
           pname = "bgutil-ytdlp-pot-provider-plugin";
           version = "git";
