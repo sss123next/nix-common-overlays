@@ -2,7 +2,7 @@
 self: super: rec {
   shiton3 =
     with super;
-    python3.override {
+    python314.override {
       bluezSupport = false;
  #     x11Support = false;
       #      enableGIL = false;
@@ -12,7 +12,7 @@ self: super: rec {
         requests =
           with prev;
           requests.overrideAttrs (old: rec {
-            version = "2.32.3";
+            version = "2.32.5";
             pname = "requests";
             patches = [ ];
             src = fetchPypi {
@@ -24,7 +24,7 @@ self: super: rec {
         websockets =
           with prev;
           websockets.overrideAttrs (old: rec {
-            version = "13.0";
+            version = "15.0.1";
             pname = "websockets";
             #patches = [];
             patchPhase = ''
