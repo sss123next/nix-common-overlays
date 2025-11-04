@@ -2,7 +2,7 @@
 self: super: rec {
   shiton3 =
     with super;
-    python314.override {
+    python3.override {
       bluezSupport = false;
  #     x11Support = false;
       #      enableGIL = false;
