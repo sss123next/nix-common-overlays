@@ -16,7 +16,6 @@ self: super: {
         #    dbus = null;
         #    libpulseaudio = null;
         #    avahi = null;
-        meta = {};
       }).overrideAttrs
       (oldAttrs: rec {
         version = "git";
@@ -24,7 +23,6 @@ self: super: {
           url = "https://github.com/Tox/toxic";
           ref = "master";
         };
-        meta = {};
       })
     );
 }
