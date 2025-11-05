@@ -17,15 +17,12 @@ self: super: {
         #    libpulseaudio = null;
         #    avahi = null;
       }).overrideAttrs
-      (old: rec {
+      (oldAttrs: rec {
         version = "git";
         src = fetchGit {
           url = "https://github.com/Tox/toxic";
           ref = "master";
         };
-        meta = old.meta // {
-      description = "Reference CLI for Tox (custom build)";
-    };
       })
     );
 }
