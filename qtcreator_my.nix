@@ -19,6 +19,7 @@ self: super: {
           wrapQtAppsHook
           wrapGAppsHook3
         ];
-      buildInputs = with qt6Packages; old.buildInputs ++ [ gsettings-desktop-schemas ];
+        buildInputs = with qt6Packages; old.buildInputs ++ [ gsettings-desktop-schemas ];
+        patches = [];
     }));
 }
