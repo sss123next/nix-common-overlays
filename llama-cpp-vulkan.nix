@@ -10,15 +10,19 @@ self: super: {
           url = "https://github.com/ggerganov/llama.cpp";
           ref = "master";
           submodules = true;
+          hash = "sha256-0WtiHDlMeb+m2XcMwkPFY1mtwVTwRJUoxQSwzpiRbts=";
+          leaveDotGit = true;
+          postFetch = ''
+            git -C "$out" rev-parse --short HEAD > $out/COMMIT  
+            find "$out" -name .git -print0 | xargs -0 rm -rf  
+          '';
         };
-#        postPatch = "";
-#        postInstall = "";
+        #        postPatch = "";
+        #        postInstall = "";
         NIX_CFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -fno-finite-math-only -O3";
         NIX_CXXFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -fno-finite-math-only -O3";
-        buildInputs =
-          old.buildInputs
-          ++ [
-            self.shaderc_my
-          ];
+        buildInputs = old.buildInputs ++ [
+          self.shaderc_my
+        ];
       });
 }
