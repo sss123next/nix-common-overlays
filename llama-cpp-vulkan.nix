@@ -10,7 +10,6 @@ self: super: {
           url = "https://github.com/ggerganov/llama.cpp";
           ref = "master";
           submodules = true;
-          hash = "sha256-0WtiHDlMeb+m2XcMwkPFY1mtwVTwRJUoxQSwzpiRbts=";
           leaveDotGit = true;
           postFetch = ''
             git -C "$out" rev-parse --short HEAD > $out/COMMIT  
