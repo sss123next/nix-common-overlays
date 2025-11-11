@@ -10,11 +10,10 @@ self: super: {
           url = "https://github.com/ggerganov/llama.cpp";
           ref = "master";
           submodules = true;
-          postFetch = ''
-            git -C "$out" rev-parse --short HEAD > $out/COMMIT  
-            find "$out" -name .git -print0 | xargs -0 rm -rf  
-          '';
         };
+         preConfigure = ''
+    prependToVar cmakeFlags "-DLLAMA_BUILD_COMMIT:STRING=master"
+  '';
         #        postPatch = "";
         #        postInstall = "";
         NIX_CFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -fno-finite-math-only -O3";
