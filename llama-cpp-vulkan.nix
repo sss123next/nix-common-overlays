@@ -17,8 +17,8 @@ self: super: {
   '';
         #        postPatch = "";
         #        postInstall = "";
-        NIX_CFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -fno-finite-math-only -O3";
-        NIX_CXXFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -fno-finite-math-only -O3";
+        NIX_CFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -mbmi2 -fno-finite-math-only -O3";
+        NIX_CXXFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -mbmi2 -fno-finite-math-only -O3";
         buildInputs = old.buildInputs ++ [
           self.shaderc_my
         ];
