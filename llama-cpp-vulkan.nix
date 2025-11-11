@@ -5,7 +5,7 @@ self: super: {
     (llama-cpp-vulkan.override {
     }).overrideAttrs
       (old: rec {
-        version = "git";
+        version = "13"; #try not to break buildsystem
         src = fetchGit {
           url = "https://github.com/ggerganov/llama.cpp";
           ref = "master";
