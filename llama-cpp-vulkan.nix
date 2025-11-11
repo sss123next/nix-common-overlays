@@ -13,6 +13,7 @@ self: super: {
         };
          preConfigure = ''
     prependToVar cmakeFlags "-DLLAMA_BUILD_COMMIT:STRING=master"
+    prependToVar cmakeFlags "-DLLAMA_BUILD_NUMBER:STRING=13"
   '';
         #        postPatch = "";
         #        postInstall = "";
