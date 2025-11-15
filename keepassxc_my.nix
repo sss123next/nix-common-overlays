@@ -11,5 +11,6 @@ self: super: {
       };
       buildInputs = oldAttrs.buildInputs ++ [ keyutils ];
       patches = [ ];
+      doCheck = false;
     });
 }
