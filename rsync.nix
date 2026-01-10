@@ -2,7 +2,7 @@
 mod: orig: {
   rsync =
     with orig;
-    (rsync.override { }).overrideAttrs (old: rec {
+    (rsync.override { stdenv = gcc13Stdenv; }).overrideAttrs (old: rec {
       version = "3.4.1";
       src = fetchurl {
         url = "mirror://samba/rsync/src/rsync-${version}.tar.gz";
