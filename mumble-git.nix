@@ -3,7 +3,7 @@ self: super: {
   mumble-git =
     with super;
     with gsettings-desktop-schemas;
-    mumble.overrideAttrs (oldAttrs: rec {
+    (mumble.override{stdenv = gcc14Stdenv;}).overrideAttrs (oldAttrs: rec {
       version = "git";
       src = fetchGit {
         url = "https://github.com/mumble-voip/mumble";
