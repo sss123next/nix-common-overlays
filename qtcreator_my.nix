@@ -6,11 +6,11 @@ self: super: {
     in
     with super;
     (qtcreator.overrideAttrs (old: rec {
-      version = "2025_09_24";
+      version = "2026_01_12";
       src = fetchGit {
         url = "https://github.com/qt-creator/qt-creator";
         ref = "master";
-        rev = "42c1ed62854f0eba2108c74beb46d72e8e3b1419";
+        rev = "e1210471c3c7773128b4cfea85b8029ce0b662a3";
       };
       nativeBuildInputs =
         with qt6Packages;
