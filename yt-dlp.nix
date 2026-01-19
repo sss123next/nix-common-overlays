@@ -46,6 +46,7 @@ self: super: {
             websockets
             requests
             urllib3
+            deno
           ];
 
           meta = with lib; {
