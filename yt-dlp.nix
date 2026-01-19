@@ -25,6 +25,7 @@ self: super: {
         requests
         urllib3
         quickjs
+        yt-dlp-ejs
         (shiton3.pkgs.buildPythonPackage {
           pname = "bgutil-ytdlp-pot-provider-plugin";
           version = "git";
