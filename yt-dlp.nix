@@ -24,7 +24,7 @@ self: super: {
         websockets
         requests
         urllib3
-        quickjs
+        deno
         yt-dlp-ejs
         (shiton3.pkgs.buildPythonPackage {
           pname = "bgutil-ytdlp-pot-provider-plugin";
