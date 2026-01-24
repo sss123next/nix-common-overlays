@@ -3,7 +3,7 @@ self: super: {
   ffmpeg_my =
     with super;
     with builtins;
-    (ffmpeg_7-full.override {
+    (ffmpeg_8-full.override {
       libaom = self.libaom_my;
       dav1d = self.dav1d_my;
       libva = self.libva_my;
@@ -38,11 +38,11 @@ self: super: {
       #          stdenv = super.ccacheStdenv;
     }).overrideAttrs
       (oldAttrs: rec {
-        version = "2025-09-27-vpl-git";
+        version = "2026-01-24-vpl-git";
         src = fetchGit {
           url = "https://git.ffmpeg.org/ffmpeg.git";
           ref = "master";
-          rev = "8a34faa250fad7dc05aa9a554b4aaafd9e7425e7";
+          rev = "ff63d4865bc553ca58b923d77df566b6979d2f2d";
           allRefs = true;
         };
         configureFlags =
