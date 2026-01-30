@@ -30,7 +30,7 @@ self: super: {
         ninja
         pkg-config
       ];
-      cmakeFlags = with cmake; [
+      cmakeFlags = with self.lib; [
         (cmakeBool "GGML_NATIVE" false)
         (cmakeBool "LLAMA_BUILD_EXAMPLES" false)
         (cmakeBool "LLAMA_BUILD_SERVER" true)
