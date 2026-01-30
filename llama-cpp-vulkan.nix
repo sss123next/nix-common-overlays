@@ -15,6 +15,9 @@ self: super: {
           prependToVar cmakeFlags "-DLLAMA_BUILD_COMMIT:STRING=master"
           prependToVar cmakeFlags "-DLLAMA_BUILD_NUMBER:STRING=13"
         '';
+        preBuild = "";
+        npmDeps = "";
+        npmRoot = "";
         #        postPatch = "";
         #        postInstall = "";
         NIX_CFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -mbmi2 -fno-finite-math-only -O3";
