@@ -2,7 +2,7 @@
 self: super: {
   llama-cpp-vulkan-git =
     with super;
-    effectiveStdenv.mkDerivation (finalAttrs: {
+    stdenv.mkDerivation (finalAttrs: {
       pname = "llama-cpp-vulkan";
       version = "13"; # try not to break buildsystem
       src = fetchGit {
