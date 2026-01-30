@@ -58,8 +58,6 @@ self: super: {
         license = lib.licenses.mit;
         mainProgram = "llama";
         platforms = lib.platforms.unix;
-        badPlatforms = optionals (cudaSupport || openclSupport) lib.platforms.darwin;
-        broken = metalSupport && !effectiveStdenv.hostPlatform.isDarwin;
       };
     });
 }
