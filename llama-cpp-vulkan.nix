@@ -50,7 +50,6 @@ self: super: {
       postInstall = ''
         mkdir -p $out/include
         cp $src/include/llama.h $out/include/
-        "cp bin/rpc-server $out/bin/llama-rpc-server";
       '';
       meta = {
         description = "Inference of Meta's LLaMA model (and others) in pure C/C++";
