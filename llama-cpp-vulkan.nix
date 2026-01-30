@@ -2,36 +2,64 @@
 self: super: {
   llama-cpp-vulkan-git =
     with super;
-    (llama-cpp-vulkan.override {
-    }).overrideAttrs
-      (old: rec {
-        version = "13"; # try not to break buildsystem
-        src = fetchGit {
-          url = "https://github.com/ggerganov/llama.cpp";
-          ref = "master";
-          submodules = true;
-        };
-        preConfigure = ''
-          prependToVar cmakeFlags "-DLLAMA_BUILD_COMMIT:STRING=master"
-          prependToVar cmakeFlags "-DLLAMA_BUILD_NUMBER:STRING=13"
-        '';
-        preBuild = "";
-        npmDeps = "";
-        npmRoot = "";
-        #        postPatch = "";
-        #        postInstall = "";
-        NIX_CFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -mbmi2 -fno-finite-math-only -O3";
-        NIX_CXXFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -mbmi2 -fno-finite-math-only -O3";
-        buildInputs = old.buildInputs ++ [
-          self.shaderc_my
-        ];
-        nativeBuildInputs = [
-          cmake
-          installShellFiles
-          ninja
-          nodejs
-          npmHooks.npmConfigHook
-          pkg-config
-        ];
-      });
+    effectiveStdenv.mkDerivation (finalAttrs: {
+      pname = "llama-cpp-vulkan";
+      version = "13"; # try not to break buildsystem
+      src = fetchGit {
+        url = "https://github.com/ggerganov/llama.cpp";
+        ref = "master";
+        submodules = true;
+      };
+      preConfigure = ''
+        prependToVar cmakeFlags "-DLLAMA_BUILD_COMMIT:STRING=master"
+        prependToVar cmakeFlags "-DLLAMA_BUILD_NUMBER:STRING=13"
+      '';
+      NIX_CFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -mbmi2 -fno-finite-math-only -O3";
+      NIX_CXXFLAGS_COMPILE = "-mavx -mavx2 -mssse3 -mfma -mf16c -mbmi2 -fno-finite-math-only -O3";
+      buildInputs = [
+        self.shaderc_my
+        vulkan-headers
+        vulkan-loader
+        openssl
+        clblast
+        blas
+      ];
+      nativeBuildInputs = [
+        cmake
+        installShellFiles
+        ninja
+        pkg-config
+      ];
+      cmakeFlags = [
+        (cmakeBool "GGML_NATIVE" false)
+        (cmakeBool "LLAMA_BUILD_EXAMPLES" false)
+        (cmakeBool "LLAMA_BUILD_SERVER" true)
+        (cmakeBool "LLAMA_BUILD_TESTS" false)
+        (cmakeBool "LLAMA_OPENSSL" true)
+        (cmakeBool "BUILD_SHARED_LIBS" true)
+        (cmakeBool "GGML_BLAS" true)
+        (cmakeBool "GGML_CLBLAST" true)
+        (cmakeBool "GGML_CUDA" false)
+        (cmakeBool "GGML_HIP" false)
+        (cmakeBool "GGML_METAL" false)
+        (cmakeBool "GGML_RPC" true)
+        (cmakeBool "GGML_VULKAN" true)
+        (cmakeFeature "LLAMA_BUILD_NUMBER" finalAttrs.version)
+        (cmakeBool "CMAKE_SKIP_BUILD_RPATH" true)
+      ];
+      postInstall = ''
+        mkdir -p $out/include
+        cp $src/include/llama.h $out/include/
+        "cp bin/rpc-server $out/bin/llama-rpc-server";
+      '';
+      meta = {
+        description = "Inference of Meta's LLaMA model (and others) in pure C/C++";
+        homepage = "https://github.com/ggml-org/llama.cpp";
+        license = lib.licenses.mit;
+        mainProgram = "llama";
+        platforms = lib.platforms.unix;
+        badPlatforms = optionals (cudaSupport || openclSupport) lib.platforms.darwin;
+        broken = metalSupport && !effectiveStdenv.hostPlatform.isDarwin;
+      };
+    });
 }
