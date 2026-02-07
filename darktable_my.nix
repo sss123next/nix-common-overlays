@@ -37,6 +37,7 @@ self: super: {
           self.libyuv_my
           openmp
           self.shaderc_my
+          potrace
         ];
         patches = [ ];
         postPatch = lib.concatStringsSep "\n" [
