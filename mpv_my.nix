@@ -43,20 +43,20 @@ self: super: {
           ref = "master";
           #              rev = "c50f536bd1ac1f8154d2b1dcaccd25ab150b414a";
         };
-        buildInputs = old.buildInputs ++ [
-          xorg.libXpresent
+        buildInputs = with xorg; old.buildInputs ++ [
+          libXpresent
           zlib
           lcms2
           libuchardet
           libarchive
-          xorg.libX11
-          xorg.libXext
+          libX11
+          libXext
           libGLU
           libGL
-          xorg.libXxf86vm
-          xorg.libXrandr
-          xorg.libXScrnSaver
-          xorg.libXinerama
+          libXxf86vm
+          libXrandr
+          libXScrnSaver
+          libXinerama
           pipewire
         ];
         postPatch = lib.concatStringsSep "\n" [

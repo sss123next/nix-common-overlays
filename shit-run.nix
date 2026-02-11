@@ -33,7 +33,7 @@ mod: orig: {
       # Steam still needs 32bit and various native games do too
       multiArch = true;
 
-      targetPkgs = pkgs: ([
+      targetPkgs = with xorg; pkgs: ([
         #    steam
         # License agreement
         #    gnome.zenity
@@ -46,7 +46,7 @@ mod: orig: {
         # run.sh wants ldconfig
         glibc.bin
         # Games' dependencies
-        xorg.xrandr
+        xrandr
         which
         # Needed by gdialog, including in the steam-runtime
         #    perl
@@ -66,14 +66,14 @@ mod: orig: {
 
       ]);
 
-      multiPkgs = pkgs: ([
+      multiPkgs = with xorg; pkgs: ([
         # These are required by steam with proper errors
-        xorg.libXcomposite
-        xorg.libXtst
-        xorg.libXrandr
-        xorg.libXext
-        xorg.libX11
-        xorg.libXfixes
+        libXcomposite
+        libXtst
+        libXrandr
+        libXext
+        libX11
+        libXfixes
         sqlite
         mod.mesa
         libGL
@@ -96,20 +96,20 @@ mod: orig: {
         vulkan-loader
         expat
         wayland
-        xorg.libxcb
-        xorg.libXdamage
-        xorg.libxshmfence
-        xorg.libXxf86vm
+        libxcb
+        libXdamage
+        libxshmfence
+        libXxf86vm
         elfutils
 
         # Without these it silently fails
-        xorg.libXinerama
-        xorg.libXcursor
-        xorg.libXrender
-        xorg.libXScrnSaver
-        xorg.libXi
-        xorg.libSM
-        xorg.libICE
+        libXinerama
+        libXcursor
+        libXrender
+        libXScrnSaver
+        libXi
+        libSM
+        libICE
         pkgs2505.gnome2.GConf
         #        (gnome2.GConf.overrideAttrs (
         #          old: rec {
@@ -132,8 +132,8 @@ mod: orig: {
         # Verified games requirements
         fontconfig
         freetype
-        xorg.libXt
-        xorg.libXmu
+        libXt
+        libXmu
         libogg
         libvorbis
         SDL
@@ -185,7 +185,7 @@ mod: orig: {
         libunwind
         libvpx
         librsvg
-        xorg.libXft
+        libXft
         libvdpau
 
         # required by coreutils stuff to run correctly
@@ -210,9 +210,9 @@ mod: orig: {
         ncurses # Crusader Kings III
         openssl
         pkgs2003.openssl_1_0_2
-        xorg.xkeyboardconfig
-        xorg.libpciaccess
-        xorg.libXScrnSaver # Dead Cells
+        xkeyboardconfig
+        libpciaccess
+        libXScrnSaver # Dead Cells
         icu # dotnet runtime, e.g. Stardew Valley
 
         # screeps dependencies
