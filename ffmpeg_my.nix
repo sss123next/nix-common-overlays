@@ -38,11 +38,11 @@ self: super: {
       #          stdenv = super.ccacheStdenv;
     }).overrideAttrs
       (oldAttrs: rec {
-        version = "2026-01-24-vpl-git";
+        version = "2026-02-14-vpl-git";
         src = fetchGit {
           url = "https://git.ffmpeg.org/ffmpeg.git";
           ref = "master";
-          rev = "ff63d4865bc553ca58b923d77df566b6979d2f2d";
+          rev = "a2489b3ac6ed909ffe880058e0efb954f1e5a6b7";
           allRefs = true;
         };
         configureFlags =
