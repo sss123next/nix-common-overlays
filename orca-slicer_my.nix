@@ -10,6 +10,7 @@ self: super: {
           url = "https://github.com/SoftFever/OrcaSlicer";
           ref = "main";
         };
+        buildInputs = old.buildInputs ++ [ libnoise ];
         doCheck = false;
         patches = [ ];
       });
