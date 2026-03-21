@@ -2,7 +2,11 @@
 self: super: {
   keepassxc =
     with super;
-    keepassxc.overrideAttrs (oldAttrs: rec {
+    (keepassxc.override{
+      withKeePassNetworking = false;
+      withKeePassSSHAgent = false;
+      withKeePassYubiKey = false;
+    }).overrideAttrs (oldAttrs: rec {
       version = "git";
       src = fetchGit {
         url = "https://github.com/keepassxreboot/keepassxc";
