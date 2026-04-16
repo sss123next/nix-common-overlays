@@ -20,12 +20,14 @@ self: super: {
         self.shaderc_my
         vulkan-headers
         vulkan-loader
+        spirv-headers
         openssl
         clblast
         blas
       ];
       nativeBuildInputs = [
         cmake
+        spirv-tools
         installShellFiles
         ninja
         pkg-config
