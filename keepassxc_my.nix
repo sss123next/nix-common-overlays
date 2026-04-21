@@ -1,6 +1,6 @@
 { inputs }:
 self: super: {
-  keepassxc =
+  keepassxc-git =
     with super;
     (keepassxc.override{
       withKeePassNetworking = false;
