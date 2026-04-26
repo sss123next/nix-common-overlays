@@ -3,6 +3,6 @@ self: super: {
   vcmi_my =
     with super;
     vcmi.overrideAttrs (old: rec {
-      cmakeFlags = old.cmakeFlags ++ [ lib.cmakeBool "ENABLE_EDITOR" false];
+      cmakeFlags = old.cmakeFlags ++ [ "-DENABLE_EDITOR=FALSE" ];
     });
 }
