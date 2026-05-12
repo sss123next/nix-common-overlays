@@ -7,8 +7,7 @@ self: super: {
       openclSupport = true;
       vulkanSupport = true;
       rocmSupport = false;
-    })
-      overrideAttrs
+    }).overrideAttrs
       (old: rec {
         version = "git";
         src = fetchGit {
