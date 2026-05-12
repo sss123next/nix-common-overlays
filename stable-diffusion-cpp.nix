@@ -2,7 +2,7 @@
 self: super: {
   stable-diffusion-cpp-vulkan-git =
     with super;
-    (stable-diffuision-cpp.override {
+    (stable-diffusion-cpp.override {
       cudaSupport = false;
       openclSupport = true;
       vulkanSupport = true;
