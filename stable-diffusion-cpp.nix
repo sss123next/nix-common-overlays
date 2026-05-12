@@ -4,7 +4,7 @@ self: super: {
     with super;
     (stable-diffusion-cpp.override {
       cudaSupport = false;
-      openclSupport = true;
+      openclSupport = false;
       vulkanSupport = true;
       rocmSupport = false;
     }).overrideAttrs
