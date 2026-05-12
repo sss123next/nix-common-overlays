@@ -13,6 +13,7 @@ self: super: {
         src = fetchGit {
           url = "https://github.com/leejet/stable-diffusion.cpp";
           ref = "master";
+          submodules = true;
         };
       });
 }
