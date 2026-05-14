@@ -48,6 +48,7 @@ self: super: {
         (cmakeBool "GGML_VULKAN" true)
         (cmakeFeature "LLAMA_BUILD_NUMBER" finalAttrs.version)
         (cmakeBool "CMAKE_SKIP_BUILD_RPATH" true)
+        "-DLLAMA_BUILD_WEBUI=OFF"
       ];
       postInstall = ''
         mkdir -p $out/include
