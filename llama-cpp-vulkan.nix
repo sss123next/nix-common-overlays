@@ -31,6 +31,7 @@ self: super: {
         installShellFiles
         ninja
         pkg-config
+        xxd
       ];
       cmakeFlags = with self.lib; [
         (cmakeBool "GGML_NATIVE" false)
