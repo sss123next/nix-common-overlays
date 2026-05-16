@@ -49,6 +49,7 @@ self: super: {
         (cmakeFeature "LLAMA_BUILD_NUMBER" finalAttrs.version)
         (cmakeBool "CMAKE_SKIP_BUILD_RPATH" true)
         "-DLLAMA_BUILD_WEBUI=OFF"
+        "-DLLAMA_BUILD_UI=OFF"
       ];
       postInstall = ''
         mkdir -p $out/include
