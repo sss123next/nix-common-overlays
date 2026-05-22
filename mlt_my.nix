@@ -25,6 +25,7 @@ self: super: {
             qtbase
             qtsvg
             qt5compat
+            rnnoise
           ];
         nativeBuildInputs = with qt6Packages; old.nativeBuildInputs ++ [ wrapQtAppsNoGuiHook ];
       });
