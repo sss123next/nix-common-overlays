@@ -8,5 +8,16 @@ self: super: {
         url = "https://github.com/flacon/flacon";
         ref = "master";
       };
+      nativeBuildInputs = [ 
+    cmake 
+    pkg-config 
+    libsForQt6.wrapQtAppsHook 
+  ]; 
+  buildInputs = [ 
+    libsForQt6.qtbase 
+    libsForQt6.qttools 
+    libuchardet 
+    taglib 
+  ];
     });
 }
