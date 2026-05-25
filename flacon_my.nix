@@ -11,11 +11,11 @@ self: super: {
       nativeBuildInputs = [ 
     cmake 
     pkg-config 
-    libsForQt6.wrapQtAppsHook 
+    qt6.wrapQtAppsHook 
   ]; 
   buildInputs = [ 
-    libsForQt6.qtbase 
-    libsForQt6.qttools 
+    qt6.qtbase 
+    qt6.qttools 
     libuchardet 
     taglib 
   ];
