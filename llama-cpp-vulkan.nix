@@ -46,7 +46,7 @@ self: super: {
         (cmakeBool "GGML_METAL" false)
         (cmakeBool "GGML_RPC" true)
         (cmakeBool "GGML_VULKAN" true)
-        (cmakeFeature "LLAMA_BUILD_NUMBER" finalAttrs.version)
+#        (cmakeFeature "LLAMA_BUILD_NUMBER" finalAttrs.version)
         (cmakeBool "CMAKE_SKIP_BUILD_RPATH" true)
         "-DLLAMA_BUILD_WEBUI=OFF"
         "-DLLAMA_BUILD_UI=OFF"
