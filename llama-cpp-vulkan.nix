@@ -4,7 +4,7 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: {
       pname = "llama-cpp-vulkan";
-      version = "13"; # try not to break buildsystem
+      version = "git"; # try not to break buildsystem
       src = fetchGit {
         url = "https://github.com/ggerganov/llama.cpp";
         ref = "master";
