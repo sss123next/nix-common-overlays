@@ -1,9 +1,9 @@
 { inputs }:
 self: super: {
-  llama-cpp-vulkan-git =
+  ik_llama-cpp-git =
     with super;
     stdenv.mkDerivation (finalAttrs: {
-      pname = "ik_llama-cpp-vulkan";
+      pname = "ik_llama-cpp";
       version = "git"; # try not to break buildsystem
       src = fetchGit {
         url = "https://github.com/ikawrakow/ik_llama.cpp";

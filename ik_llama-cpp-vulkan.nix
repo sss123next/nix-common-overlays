@@ -1,6 +1,6 @@
 { inputs }:
 self: super: {
-  llama-cpp-vulkan-git =
+  ik_llama-cpp-vulkan-git =
     with super;
     stdenv.mkDerivation (finalAttrs: {
       pname = "ik_llama-cpp-vulkan";
