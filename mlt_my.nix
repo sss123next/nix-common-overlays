@@ -18,7 +18,7 @@ self: super: {
         };
         buildInputs =
           with qt6Packages;
-          old.buildInputs
+          (old.buildInputs or [])
           ++ [
             gdk-pixbuf
             libebur128
@@ -26,6 +26,7 @@ self: super: {
             qtsvg
             qt5compat
             rnnoise
+            lilv
           ];
         nativeBuildInputs = with qt6Packages; old.nativeBuildInputs ++ [ wrapQtAppsNoGuiHook ];
       });
