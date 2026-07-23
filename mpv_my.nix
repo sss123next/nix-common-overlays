@@ -8,7 +8,6 @@ self: super: {
     (mpv-unwrapped.override {
       archiveSupport = true;
       bluraySupport = true;
-      bs2bSupport = true;
       cmsSupport = true;
       cacaSupport = false;
       drmSupport = true;
