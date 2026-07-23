@@ -26,35 +26,6 @@ self: super: {
         urllib3
         deno
         yt-dlp-ejs
-        (shiton3.pkgs.buildPythonPackage {
-          pname = "bgutil-ytdlp-pot-provider-plugin";
-          version = "git";
-          pyproject = true;
-          src = fetchGit {
-            url = "https://github.com/Brainicism/bgutil-ytdlp-pot-provider";
-            ref = "master";
-          };
-          preBuild = ''
-            cd plugin
-          '';
-          nativeBuildInputs = [ hatchling ];
-          propagatedBuildInputs = [
-            brotli
-            certifi
-            mutagen
-            pycryptodomex
-            websockets
-            requests
-            urllib3
-            deno
-          ];
-
-          meta = with lib; {
-            homepage = "https://github.com/Brainicism/bgutil-ytdlp-pot-provider";
-            description = "A proof-of-origin token (POT) provider yt-dlp";
-            license = licenses.gpl3;
-          };
-        })
       ];
       makeWrapperArgs =
         let
