@@ -6,7 +6,7 @@ self: super: {
     shiton3.pkgs.buildPythonPackage {
 
       pname = "yt-dlp";
-      version = "0.0.0.0";
+      version = "2026.7.4";
       #  format = "setuptools";
       pyproject = true;
       src = fetchGit {
