@@ -12,7 +12,6 @@ self: super: {
       usbredirSupport = true;
       xenSupport = false;
       cephSupport = false;
-      glusterfsSupport = false;
       openGLSupport = false;
       virglSupport = true;
       libiscsiSupport = false;
