@@ -9,7 +9,7 @@ self: super: {
       #      (pkgsmaster.mpd.override {
       (mpd.override {
         ffmpeg = self.ffmpeg_my;
-        #    stdenv = llvmPackages_17.stdenv;
+            stdenv = llvmPackages_22.stdenv;
         #    samba = null;
         #    dbus = null;
         #    libpulseaudio = null;
@@ -20,7 +20,7 @@ self: super: {
           src = fetchGit {
             url = "https://github.com/MusicPlayerDaemon/MPD";
             ref = "master";
-            rev = "d4e8fa5eded583a710e4a47b3f51ca26a4ad31f1";
+#            rev = "d4e8fa5eded583a710e4a47b3f51ca26a4ad31f1";
           };
           buildInputs = oldAttrs.buildInputs ++ [ soxr ];
           mesonFlags = oldAttrs.mesonFlags ++ [
