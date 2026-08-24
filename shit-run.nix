@@ -151,7 +151,7 @@ mod: orig: {
 
         # Other things from runtime
         glib
-        gtk2
+        pkgs2505.gtk2
         bzip2
         flac
         freeglut
@@ -176,9 +176,9 @@ mod: orig: {
         sdl3
         sdl3-image
         sdl3-ttf
-        libappindicator-gtk2
-        libdbusmenu-gtk2
-        libindicator-gtk2
+        pkgs2505.libappindicator-gtk2
+        pkgs2505.libdbusmenu-gtk2
+        pkgs2505.libindicator-gtk2
         libcaca
         libcanberra
         libgcrypt
