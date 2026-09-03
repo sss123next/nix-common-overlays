@@ -1,17 +1,14 @@
 { inputs }:
 self: super: {
   qtcreator_my =
-    let
-      #      pkgsmaster = import inputs.nixpkgsmaster { };
-    in
     with super;
     (qtcreator.overrideAttrs (old: rec {
-      version = "2026_09_03";
-      src = fetchGit {
-        url = "https://github.com/qt-creator/qt-creator";
-        ref = "master";
-        rev = "54089a4022b33d3fbb2f4a6f9fa4fb33038ea493";
-      };
+#      version = "2026_09_03";
+#      src = fetchGit {
+#        url = "https://github.com/qt-creator/qt-creator";
+#        ref = "master";
+#        rev = "54089a4022b33d3fbb2f4a6f9fa4fb33038ea493";
+#      };
       nativeBuildInputs =
         with qt6Packages;
         old.nativeBuildInputs or []
