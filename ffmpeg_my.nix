@@ -46,7 +46,11 @@ self: super: {
           rev = "e4ed85ab73406c970c7cc30207f663572f5a4c30";
           allRefs = true;
         };
-        configureFlags = oldAttrs.configureFlags ++ [
+        configureFlags = lib.filter (f:
+          # libcelt option removed from ffmpeg 8 configure, but nixpkgs still
+          # generates it (guard: versionOlder version "9.0" is too broad)
+          !(lib.hasInfix "libcelt" f)
+        ) oldAttrs.configureFlags ++ [
           # Intel VPL hardware acceleration
           "--enable-libvpl"
           # Build optimizations
