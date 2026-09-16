@@ -8,14 +8,14 @@ self: super: {
       src = fetchGit {
         url = "https://github.com/intel/libvpl";
         ref = "main";
-        #                  rev = "e71b1efc1263ae216569f62d018033ab5a850e00";
+        rev = "674d015bcb294bc39fa276e99a652ea045423e82";
       };
       nativeBuildInputs = [
         cmake
         pkg-config
       ];
       buildInputs = with xorg; [
-        libva
+        self.libva_my
         libdrm
         libpciaccess
         libX11
