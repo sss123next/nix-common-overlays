@@ -46,11 +46,11 @@ self: super: {
           allRefs = true;
         };
         configureFlags =
-          (lib.lists.remove "--enable-libcelt" (lib.lists.remove "--enable-liblcevc-dec" (lib.lists.remove "--enable-postproc" (
+          (lib.lists.remove "--disable-libshaderc"  (lib.lists.remove "--enable-libcelt" (lib.lists.remove "--enable-liblcevc-dec" (lib.lists.remove "--enable-postproc" (
             lib.lists.remove "--enable-avresample" (
               lib.lists.remove "--disable-avresample" oldAttrs.configureFlags
             )
-          ))))
+          )))))
           ++ [
             "--enable-libvpl"
             "--disable-hardcoded-tables"
