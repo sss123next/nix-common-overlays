@@ -67,7 +67,7 @@ self: super: {
         self.mesa
         libGL
         libva
-        mod.pipewire
+        self.pipewire
         wireplumber
         pulseaudio
         openal
