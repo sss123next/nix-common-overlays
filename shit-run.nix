@@ -64,7 +64,7 @@ self: super: {
         libX11
         libXfixes
         sqlite
-        mod.mesa
+        self.mesa
         libGL
         libva
         mod.pipewire
