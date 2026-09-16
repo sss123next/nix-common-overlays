@@ -25,9 +25,10 @@ self: super: {
       withAmf = false;
       withOpencl = false;
 
-      # --- Deprecated/removed codecs for ffmpeg 8 ---
-      withCelt = false; # removed in ffmpeg 9, unnecessary
+      # --- Deprecated/removed options for this ffmpeg snapshot ---
+      withCelt = false; # configure: no libcelt option
       withLcevcdec = false; # not needed
+      withShaderc = false; # configure: no libshaderc option
 
       # --- Enabled features ---
       withFullDeps = true;
@@ -36,7 +37,7 @@ self: super: {
       withFreetype = true;
       withFontconfig = true;
       withSvg = true;
-      # withShaderc and withPlacebo default to true with fullDeps
+      # withPlacebo defaults to true with fullDeps
     }).overrideAttrs
       (oldAttrs: rec {
         version = "2026-09-07-vpl-git";
@@ -47,9 +48,10 @@ self: super: {
           allRefs = true;
         };
         configureFlags = lib.filter (f:
-          # libcelt option removed from ffmpeg 8 configure, but nixpkgs still
-          # generates it (guard: versionOlder version "9.0" is too broad)
-          !(lib.hasInfix "libcelt" f)
+          # Removed from configure in this ffmpeg snapshot; nixpkgs still
+          # generates them via versionOlder guards that are too broad.
+          !(lib.hasInfix "libcelt" f) &&
+          !(lib.hasInfix "libshaderc" f)
         ) oldAttrs.configureFlags ++ [
           # Intel VPL hardware acceleration
           "--enable-libvpl"
@@ -60,7 +62,6 @@ self: super: {
         nativeBuildInputs = oldAttrs.nativeBuildInputs ++ [ nasm ];
         buildInputs = oldAttrs.buildInputs ++ [
           self.libvpl
-          shaderc
         ];
         patches = [ ];
         postPatch = "";

@@ -1,11 +1,5 @@
 { inputs }:
 let
-  nixpkgsmaster = import <nixpkgsmaster> { };
-  nixpkgs2111 = import <nixpkgs2111> { };
-  nixpkgs2105 = import <nixpkgs2105> { };
-  nixpkgs2009 = import <nixpkgs2009> { };
-  nixpkgs2003 = import <nixpkgs2003> { };
-  nixpkgs1809 = import <nixpkgs1809> { };
   cmFlag = flag: if flag then "ON" else "OFF";
 in
 self: super: {

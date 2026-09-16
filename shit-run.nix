@@ -3,16 +3,6 @@ let
   pkgs2505 = import inputs.nixpkgs2505 { };
   pkgs2003 = import inputs.nixpkgs2003 { };
 
-  ldPath = [ "/lib64" ] ++ [ "/lib32" ];
-
-  exportLDPath =
-    lib: with lib; ''
-      export LD_LIBRARY_PATH=${lib.concatStringsSep ":" ldPath}''${LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH
-    '';
-  #  ++  ''
-  #    export STEAM_LD_LIBRARY_PATH="$STEAM_LD_LIBRARY_PATH''${STEAM_LD_LIBRARY_PATH:+:}$LD_LIBRARY_PATH"
-  #    '';
-
   envScript = ''
     # prevents various error messages
     unset GIO_EXTRA_MODULES
@@ -23,10 +13,9 @@ let
   '';
 
 in
-mod: orig: {
-  #  steam-run_my = with orig; with steam; with steamPackages; buildFHSEnv  {
+self: super: {
   shit-run =
-    with orig;
+    with super;
     buildFHSEnv {
       name = "shit-run";
 
@@ -111,12 +100,6 @@ mod: orig: {
         libSM
         libICE
         pkgs2505.gnome2.GConf
-        #        (gnome2.GConf.overrideAttrs (
-        #          old: rec {
-        #            nativeBuildInputs = old.nativeBuildInputs ++ [ python3Packages.2to3 ];
-        #          }
-        #          )
-        #        )
         curlWithGnuTls
         nspr
         nss
@@ -257,20 +240,6 @@ mod: orig: {
         export SDL_JOYSTICK_DISABLE_UDEV=1
       '';
 
-      # runScript = (writeShellScript "shit-run" ''
-      #   run="$1"
-      #   if [ "$run" = "" ]; then
-      #     echo "Usage: shit-run command-to-run args..." >&2
-      #     exit 1
-      #   fi
-      #   shift
-      #
-      #  ${exportLDPath}
-      #
-      #   set -o allexport # Export the following env vars
-      #   ${envScript}
-      #   exec -- "$run" "$@"
-      # '');
       runScript = (
         writeShellScript "shit-run" ''
           run="$1"
@@ -287,7 +256,6 @@ mod: orig: {
         ''
       );
 
-      #    runScript = "bash";
       privateTmp = true;
 
       extraPreBwrapCmds = ''
