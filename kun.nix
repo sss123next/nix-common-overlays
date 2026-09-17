@@ -112,8 +112,12 @@ self: super: {
 
         # electron-vite builds into out/main/ but the app resolves
         # kun/dist/cli relative to app.getAppPath() which is out/main/.
-        # The kun/ subtree builds into kun/dist/, so symlink it into out/main/.
-        ln -s ../../kun "$out/share/kun/out/main/kun"
+        # The kun/ subtree builds into kun/dist/, so copy dist/ into out/main/.
+        # MUST be a real copy, not a symlink — Node.js ESM resolves symlinks for
+        # import.meta.url but process.argv[1] keeps the caller's path, breaking
+        # the manager-entry.js guard (import.meta.url === pathToFileURL(argv[1])).
+        mkdir -p "$out/share/kun/out/main/kun"
+        cp -r "$out/share/kun/kun/dist" "$out/share/kun/out/main/kun/dist"
 
         mkdir -p "$out/share/icons/hicolor/512x512/apps"
         cp src/asset/img/kun.png "$out/share/icons/hicolor/512x512/apps/kun.png"
