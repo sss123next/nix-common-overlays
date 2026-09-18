@@ -28,17 +28,19 @@ self: super: {
             runHook preBuild
 
             export BUN_INSTALL_CACHE_DIR=$(mktemp -d)
+            # Pin a single os/cpu so the fixed-output FOD hash is reproducible and
+            # matches nixpkgs' per-system hashes.json (see opencode issue #49063:
+            # "node_modules FOD hash is calibrated against one bun version").
             bun install \
-              --cpu="*" \
+              --cpu="${if stdenv.hostPlatform.isAarch64 then "arm64" else "x64"}" \
+              --os="${if stdenv.hostPlatform.isLinux then "linux" else "darwin"}" \
+              --filter '!./' \
+              --filter './packages/cli' \
+              --filter './packages/desktop' \
+              --filter './packages/app' \
               --frozen-lockfile \
-              --filter ./ \
-              --filter ./packages/app \
-              --filter ./packages/desktop \
-              --filter ./packages/opencode \
-              --filter ./packages/shared \
               --ignore-scripts \
-              --no-progress \
-              --os="*"
+              --no-progress
 
             bun --bun ./nix/scripts/canonicalize-node-modules.ts
             bun --bun ./nix/scripts/normalize-bun-binaries.ts
@@ -53,10 +55,9 @@ self: super: {
             find . -type d -name node_modules -exec cp -R --parents {} $out \;
 
             # opencode targets only Linux and Darwin (see meta.platforms), so the
-            # Windows executables that "bun install --os=*" fetches are never
-            # executed. Dropping them keeps the output reproducible on hosts whose
-            # security endpoint agents scan the store, and removes the vulnerable
-            # bundled 7za.exe that will be quarantined.
+            # Windows executables that "bun install" fetches are never executed.
+            # Dropping them keeps the output reproducible on hosts whose security
+            # endpoint agents scan the store, and removes the vulnerable bundled 7za.exe.
             find $out -type f -name '*.exe' -delete
 
             runHook postInstall
@@ -65,14 +66,30 @@ self: super: {
           # NOTE: Required else we get errors that our fixed-output derivation references store paths
           dontFixup = true;
 
-          outputHash = "sha256-qWZuOpolZAr7EZlAgfVx8nw8axoOMauoXwcqiJUGu24=";
           outputHashAlgo = "sha256";
           outputHashMode = "recursive";
+          outputHash = {
+            # Calibrated against our nixpkgs bun (official hashes.json keys to a
+            # different bun ABI, hence the mismatch — see opencode issue #49063).
+            "x86_64-linux"   = "sha256-S8TdgwyXDOveGQ8Jl7V1qIu4VDqkk4PcvN1e/C21Acc=";
+            "aarch64-linux"  = "sha256-Wc8OT2DRZpVo56KaoGE0Hsj1NDknakbWXO9w2qy6j+0=";
+            "aarch64-darwin" = "sha256-wAea8+jajnMDxZ6XJL+Hsrf0621hwtBtWyD1+dS45dE=";
+            "x86_64-darwin"  = "sha256-g8PCNBSV6rO+VQjKU9AtYqj+r18o+fhLDXEQq+X2EZ4=";
+          }.${stdenv.hostPlatform.system};
         };
+
+      # schema.ts in v2 writes a single file per invocation (argv[2] only), so the
+      # config and tui schemas have to be generated separately.
+      schema = finalAttrs: ''
+        bun --bun ./packages/cli/script/schema.ts "$out/share/config.json" \
+          && cp config.json $out/share/config.json \
+          && bun --bun ./packages/cli/script/schema.ts "$out/share/tui.json" \
+          && cp tui.json $out/share/tui.json
+      '';
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "1.18.31";
+      version = "2.0.6";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -81,7 +98,7 @@ self: super: {
         owner = "anomalyco";
         repo = "opencode";
         tag = "v${finalAttrs.version}";
-        hash = "sha256-Q0DYH5GHQGZ6ICyMR5rWq86DvfWpQERGZeLYTJb7cj0=";
+        hash = "sha256-KvYgrgBYb6HWMTtteA7zv+o8Mot9KTJm+F9cPoT0QkU=";
       };
 
       postPatch =
@@ -92,12 +109,10 @@ self: super: {
             'throw new Error(`This script requires bun@''${expectedBunVersionRange}' \
             'console.warn(`Warning: This script requires bun@''${expectedBunVersionRange}'
         ''
-        # Skip smoke test
+        # Bun 1.4.x regressed compiled executable code splitting (nixpkgs PR #564101).
         + ''
-          substituteInPlace packages/opencode/script/build.ts \
-            --replace-fail \
-            'if (item.os === process.platform && item.arch === process.arch && !item.abi)' \
-            'if (false)'
+          substituteInPlace packages/cli/script/build.ts \
+            --replace-fail 'splitting: true,' 'splitting: false,'
         '';
 
       nativeBuildInputs = [
@@ -124,15 +139,23 @@ self: super: {
       env.MODELS_DEV_API_JSON = "${models-dev}/dist/_api.json";
       env.OPENCODE_DISABLE_MODELS_FETCH = true;
       env.OPENCODE_VERSION = finalAttrs.version;
-      env.OPENCODE_CHANNEL = "stable";
+      env.OPENCODE_CHANNEL = "prod";
+      # v2 bundles more packages into the CLI; give bun's GC room to avoid OOM.
+      env.NODE_OPTIONS = "--max-old-space-size=4096";
 
       buildPhase = ''
         runHook preBuild
 
-        cd ./packages/opencode
+        cd ./packages/cli
         bun --bun ./script/build.ts --single --skip-install
-        bun --bun ./script/schema.ts config.json tui.json
-        substituteInPlace config.json \
+
+        # Generate the config and tui JSON schemas (schema.ts writes one file per call).
+        bun --bun ./script/schema.ts config.json
+        cp config.json "$out/share/config.json"
+        bun --bun ./script/schema.ts tui.json
+        cp tui.json "$out/share/tui.json"
+
+        substituteInPlace "$out/share/config.json" \
           --replace-fail "https://models.dev/model-schema.json" \
                          "file://$out/share/model-schema.json"
 
@@ -142,23 +165,22 @@ self: super: {
       installPhase = ''
         runHook preInstall
 
-        install -Dm755 dist/opencode-*/bin/opencode $out/bin/opencode
+        # v2 outputs dist/cli-<os>-<arch>/bin/opencode (was dist/opencode-* in 1.x).
+        install -Dm755 dist/cli-*/bin/opencode $out/bin/opencode
+        # OpenTUI dlopens Wayland for clipboard image support on Linux hosts.
         wrapProgram $out/bin/opencode \
-         --prefix PATH : ${
-           lib.makeBinPath (
-             [
-               ripgrep
-             ]
-             ++ lib.optionals stdenv.hostPlatform.isDarwin [
-               sysctl
-             ]
-           )
-         } \
+          --prefix PATH : ${
+            lib.makeBinPath (
+              [ ripgrep ]
+              ++ lib.optionals stdenv.hostPlatform.isDarwin [ sysctl ]
+            )
+          } \
+          ${lib.optionalString stdenv.hostPlatform.isLinux "--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ wayland ]}"} \
         --set OPENCODE_DISABLE_AUTOUPDATE true
 
         install -Dm644 ${models-dev.jsonschema} $out/share/model-schema.json
-        install -Dm644 config.json $out/share/config.json
-        install -Dm644 tui.json $out/share/tui.json
+        install -Dm644 "$out/share/config.json" $out/share/config.json
+        install -Dm644 "$out/share/tui.json" $out/share/tui.json
         install -Dm644 ../web/public/theme.json $out/share/theme.json
 
         runHook postInstall
@@ -198,7 +220,7 @@ self: super: {
 
       meta = {
         description = "AI coding agent built for the terminal";
-        homepage = "https://github.com/anomalyco/opencode";
+        homepage = "https://opencode.ai";
         changelog = "https://github.com/anomalyco/opencode/releases/tag/v${finalAttrs.version}";
         license = lib.licenses.mit;
         maintainers = with lib.maintainers; [
@@ -211,6 +233,7 @@ self: super: {
           "aarch64-linux"
           "x86_64-linux"
           "aarch64-darwin"
+          "x86_64-darwin"
         ];
         mainProgram = "opencode";
       };
