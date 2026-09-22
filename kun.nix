@@ -129,6 +129,23 @@ self: super: {
         ln -s ../../../kun/node_modules "$out/share/kun/out/main/kun/node_modules"
         ln -s ../../../kun/package.json "$out/share/kun/out/main/kun/package.json"
 
+        # electron-updater validates app.getVersion() as semver at startup;
+        # "0.0" → ERR_UPDATER_INVALID_VERSION. With FILE launch Electron
+        # ignores package.json (falls back to "0.0" for Kun), so the wrapper
+        # launches out/main as a DIRECTORY and Electron reads version from
+        # this manifest (0.3.9). "main" must be ./index.js relative to
+        # out/main (root package.json points to ./out/main/index.js — wrong
+        # here). "type": "module" keeps index.js ESM.
+        cat > "$out/share/kun/out/main/package.json" <<'PKGEOF'
+        {
+          "name": "kun-gui",
+          "productName": "Kun",
+          "version": "0.3.9",
+          "type": "module",
+          "main": "./index.js"
+        }
+        PKGEOF
+
         mkdir -p "$out/share/icons/hicolor/512x512/apps"
         cp src/asset/img/kun.png "$out/share/icons/hicolor/512x512/apps/kun.png"
 
@@ -149,7 +166,7 @@ self: super: {
         done
 
         makeWrapper ${lib.getExe electron} "$out/bin/kun" \
-          --add-flags "$out/share/kun/out/main/index.js" \
+          --add-flags "$out/share/kun/out/main" \
           --add-flags "\''${NIXOS_OZONE_WL:+\''${WAYLAND_DISPLAY:+--ozone-platform-hint=auto --enable-features=WaylandWindowDecorations --enable-wayland-ime=true}}" \
           --add-flags "--disable-setuid-sandbox" \
           --add-flags "--no-first-run"
