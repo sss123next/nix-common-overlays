@@ -70,11 +70,11 @@ self: super: {
           outputHashMode = "recursive";
           # Calibrated against our nixpkgs bun 1.4.x (the official hashes.json keys to a different
           # bun ABI — opencode issue #49063), so values are pinned from local `got:` output, not
-          # upstream. x86_64-linux re-pinned for the v2.0.11 dep delta; other systems stay
+          # upstream. x86_64-linux re-pinned for the v2.0.14 dep delta; other systems stay
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-omWCGP2e5LgcwahqIOD1QuBdjyEtJ5nURsbVDaqS1R8=";
+            "x86_64-linux"   = "sha256-KpvRouoy6xe4Dbq4Ud12UqrvXo5TWdEQfrQj2x35jHA=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -92,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.0.11";
+      version = "2.0.14";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -102,8 +102,8 @@ self: super: {
         repo = "opencode";
         tag = "v${finalAttrs.version}";
         # Recursive hash of the unpacked tree (fetchFromGitHub semantics); the codeload
-        # tarball SRI is sha256-CaDQhn2PrZFZxId1O3bz1hgEFQfw5l/B0sDUbdoo3Ks=.
-        hash = "sha256-hc05j92gAboiRlKcV9flSfsJ2x8KaGXGEYuVYDyqxLU=";
+        # tarball SRI is sha256-xfOtoVUEqJqzroc0upcqVKE7kM9VTrp8AXyz5ADTmQc=.
+        hash = "sha256-xfOtoVUEqJqzroc0upcqVKE7kM9VTrp8AXyz5ADTmQc=";
       };
 
       postPatch =
@@ -206,9 +206,13 @@ self: super: {
           codesign --force --sign - $out/bin/.opencode-wrapped
         ''
         + lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
+          # v2 dropped the `completion` subcommand (it was parsed as the positional
+          # `directory` arg) in favour of the global flag `--completions <shell>`.
+          # The old form wrote an ENOENT traceback to stdout, so completions silently
+          # contained an error message instead of a script.
           installShellCompletion --cmd opencode \
-            --bash <($out/bin/opencode completion) \
-            --zsh <(SHELL=/bin/zsh $out/bin/opencode completion)
+            --bash <($out/bin/opencode --completions bash) \
+            --zsh <(SHELL=/bin/zsh $out/bin/opencode --completions zsh)
         '';
 
       dontStrip = true;
