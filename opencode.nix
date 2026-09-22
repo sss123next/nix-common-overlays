@@ -68,13 +68,16 @@ self: super: {
 
           outputHashAlgo = "sha256";
           outputHashMode = "recursive";
+          # Calibrated against our nixpkgs bun 1.4.x (the official hashes.json keys to a different
+          # bun ABI — opencode issue #49063), so values are pinned from local `got:` output, not
+          # upstream. x86_64-linux re-pinned for the v2.0.11 dep delta; other systems stay
+          # placeholders until recalibrated where they can be built — with a stale declared hash
+          # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            # Calibrated against our nixpkgs bun (official hashes.json keys to a
-            # different bun ABI, hence the mismatch — see opencode issue #49063).
-            "x86_64-linux"   = "sha256-S8TdgwyXDOveGQ8Jl7V1qIu4VDqkk4PcvN1e/C21Acc=";
-            "aarch64-linux"  = "sha256-Wc8OT2DRZpVo56KaoGE0Hsj1NDknakbWXO9w2qy6j+0=";
-            "aarch64-darwin" = "sha256-wAea8+jajnMDxZ6XJL+Hsrf0621hwtBtWyD1+dS45dE=";
-            "x86_64-darwin"  = "sha256-g8PCNBSV6rO+VQjKU9AtYqj+r18o+fhLDXEQq+X2EZ4=";
+            "x86_64-linux"   = "sha256-omWCGP2e5LgcwahqIOD1QuBdjyEtJ5nURsbVDaqS1R8=";
+            "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
+            "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
+            "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
           }.${stdenv.hostPlatform.system};
         };
 
@@ -89,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.0.6";
+      version = "2.0.11";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -98,7 +101,9 @@ self: super: {
         owner = "anomalyco";
         repo = "opencode";
         tag = "v${finalAttrs.version}";
-        hash = "sha256-KvYgrgBYb6HWMTtteA7zv+o8Mot9KTJm+F9cPoT0QkU=";
+        # Recursive hash of the unpacked tree (fetchFromGitHub semantics); the codeload
+        # tarball SRI is sha256-CaDQhn2PrZFZxId1O3bz1hgEFQfw5l/B0sDUbdoo3Ks=.
+        hash = "sha256-hc05j92gAboiRlKcV9flSfsJ2x8KaGXGEYuVYDyqxLU=";
       };
 
       postPatch =
@@ -113,6 +118,16 @@ self: super: {
         + ''
           substituteInPlace packages/cli/script/build.ts \
             --replace-fail 'splitting: true,' 'splitting: false,'
+        ''
+        # schema.ts imports prettier solely to pretty-print the generated JSON. Prettier is a root
+        # workspace devDependency and our FOD install excludes the root (--filter '!./', like
+        # upstream's in-tree nix packaging, which therefore never runs schema.ts), so it cannot be
+        # resolved at build time. Stub format() to return its input unchanged instead of adding an
+        # extra build input for cosmetics only (bun transpiles without type-checking).
+        + ''
+          substituteInPlace packages/cli/script/schema.ts \
+            --replace-fail 'import { format } from "prettier"' \
+                           'const format = (_input: string) => _input'
         '';
 
       nativeBuildInputs = [
@@ -149,15 +164,16 @@ self: super: {
         cd ./packages/cli
         bun --bun ./script/build.ts --single --skip-install
 
+        # $out is empty until installPhase, so create the target dir first.
+        mkdir -p "$out/share"
         # Generate the config and tui JSON schemas (schema.ts writes one file per call).
         bun --bun ./script/schema.ts config.json
         cp config.json "$out/share/config.json"
         bun --bun ./script/schema.ts tui.json
         cp tui.json "$out/share/tui.json"
 
-        substituteInPlace "$out/share/config.json" \
-          --replace-fail "https://models.dev/model-schema.json" \
-                         "file://$out/share/model-schema.json"
+        # v2 config.json no longer embeds a models.dev URL ($id is now opencode.ai/v2/cli.json),
+        # so the old file:// localization of model-schema.json has nothing to target.
 
         runHook postBuild
       '';
@@ -178,9 +194,8 @@ self: super: {
           ${lib.optionalString stdenv.hostPlatform.isLinux "--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ wayland ]}"} \
         --set OPENCODE_DISABLE_AUTOUPDATE true
 
+        # config.json / tui.json are already in place from buildPhase.
         install -Dm644 ${models-dev.jsonschema} $out/share/model-schema.json
-        install -Dm644 "$out/share/config.json" $out/share/config.json
-        install -Dm644 "$out/share/tui.json" $out/share/tui.json
         install -Dm644 ../web/public/theme.json $out/share/theme.json
 
         runHook postInstall
