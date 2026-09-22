@@ -112,12 +112,22 @@ self: super: {
 
         # electron-vite builds into out/main/ but the app resolves
         # kun/dist/cli relative to app.getAppPath() which is out/main/.
-        # The kun/ subtree builds into kun/dist/, so copy dist/ into out/main/.
-        # MUST be a real copy, not a symlink — Node.js ESM resolves symlinks for
-        # import.meta.url but process.argv[1] keeps the caller's path, breaking
-        # the manager-entry.js guard (import.meta.url === pathToFileURL(argv[1])).
+        # The kun/ subtree builds into kun/dist/, so expose it under out/main/kun/.
+        #
+        # dist/ MUST be a real copy, not a symlink — Node.js ESM resolves
+        # symlinks for import.meta.url but process.argv[1] keeps the caller's
+        # path, breaking the manager-entry.js guard
+        # (import.meta.url === pathToFileURL(process.argv[1]).href): the manager
+        # then silently exits 0 without ever calling main(), and the GUI fails
+        # with "Service Manager did not become ready".
+        #
+        # node_modules/ and package.json stay symlinks (module resolution only
+        # stat()s them; missing them breaks bare imports like safe-regex2).
         mkdir -p "$out/share/kun/out/main/kun"
-        cp -r "$out/share/kun/kun/dist" "$out/share/kun/out/main/kun/dist"
+        cp -rl "$out/share/kun/kun/dist" "$out/share/kun/out/main/kun/dist" \
+          || cp -r "$out/share/kun/kun/dist" "$out/share/kun/out/main/kun/dist"
+        ln -s ../../../kun/node_modules "$out/share/kun/out/main/kun/node_modules"
+        ln -s ../../../kun/package.json "$out/share/kun/out/main/kun/package.json"
 
         mkdir -p "$out/share/icons/hicolor/512x512/apps"
         cp src/asset/img/kun.png "$out/share/icons/hicolor/512x512/apps/kun.png"
