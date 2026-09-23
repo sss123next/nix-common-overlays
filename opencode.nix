@@ -106,6 +106,15 @@ self: super: {
         hash = "sha256-xfOtoVUEqJqzroc0upcqVKE7kM9VTrp8AXyz5ADTmQc=";
       };
 
+      # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
+      # native provider streams off with `Transport error (POST .../chat/completions)` before
+      # the first byte arrives (upload + prefill > 5 min). The AISDK path and run.ts already
+      # pass `timeout: false`; the native path never gets a chance to, because
+      # Provider.nativeSettings strips `options.timeout`. Wrap the global HttpClient's fetch so
+      # every native request opts out, like packages/cli/src/run/run.ts does.
+      # Bump-dependent: must apply cleanly to the src tag above.
+      patches = [ ./patches/opencode-native-fetch-timeout.patch ];
+
       postPatch =
         # Relax Bun version check to be a warning instead of an error
         ''
