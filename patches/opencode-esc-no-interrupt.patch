@@ -1,0 +1,20 @@
+diff --git a/packages/app/src/composer/editor/interaction.ts b/packages/app/src/composer/editor/interaction.ts
+--- a/packages/app/src/composer/editor/interaction.ts
++++ b/packages/app/src/composer/editor/interaction.ts
+@@ -222,10 +222,14 @@
+       input.view.submit.queue.cancelEdit()
+       return true
+     }
++    // Stop is Ctrl+G only: bare Escape must not abort a running generation.
+     const stop =
+       input.view.submit.working?.() &&
+-      ((event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "g") ||
+-        event.key === "Escape")
++      event.ctrlKey &&
++      !event.metaKey &&
++      !event.altKey &&
++      !event.shiftKey &&
++      event.key.toLowerCase() === "g"
+     if (stop) {
+       event.preventDefault()
+       input.view.submit.onStop()
