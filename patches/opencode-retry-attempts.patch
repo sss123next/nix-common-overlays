@@ -1,0 +1,23 @@
+diff --git a/packages/core/src/session/runner/retry.ts b/packages/core/src/session/runner/retry.ts
+--- a/packages/core/src/session/runner/retry.ts
++++ b/packages/core/src/session/runner/retry.ts
+@@ -74,12 +74,15 @@
+   return undefined
+ }
+ 
+-// Exponential from 2s capped at 10s per gap, for 10 retries: 2, 4, 8, then 10 × 7, about 84s of
+-// waiting when every attempt fails (67–101s with jitter). `min` takes the faster schedule, so the
+-// cap applies per gap; `max` with `recurs` bounds the count.
++// Exponential from 2s capped at 10s per gap: 2, 4, 8, then 10s steps with jitter. `min` takes the
++// faster schedule, so the cap applies per gap; `max` with `recurs` bounds the count. The attempt
++// count defaults to 65535 — transient provider failures such as HTTP 500 keep retrying for days
++// instead of giving up after ~84s — and can be overridden with OPENCODE_RETRY_ATTEMPTS.
++const parsedRetries = Number.parseInt(process.env.OPENCODE_RETRY_ATTEMPTS ?? "", 10)
++const retries = Number.isNaN(parsedRetries) || parsedRetries < 0 ? 65535 : parsedRetries
+ const schedule = Schedule.max([
+   Schedule.min([Schedule.exponential("2 seconds"), Schedule.spaced("10 seconds")]),
+-  Schedule.recurs(10),
++  Schedule.recurs(retries),
+ ]).pipe(
+   Schedule.jittered,
+   Schedule.setInputType<Input>(),
