@@ -2,6 +2,42 @@
 self: super: {
   deepseek-harness =
     with super;
+    let
+      # The boot hard-requires node-addon-require-builtin, whose prebuilt .node
+      # scans the running node binary for a V8 "x64 sysv getter" accessor and
+      # fails with Unsupported/no-getter on nixpkgs' node build (different
+      # toolchain/codegen; verified 2026-09 with the same v24.20.0: nixpkgs
+      # FAIL, official nodejs.org binary OK). Ship the official binary and run
+      # `dsh` with it; nixpkgs node still drives the pnpm/tsc/vite build.
+      officialNodeVersion = "24.20.0";
+      officialNodeDist = {
+        "x86_64-linux" = {
+          os = "linux";
+          arch = "x64";
+          hash = "sha256-LywNoWIxjw3kdmVBDHyMLtPTbI8xBd5LvGEXbHCny/I=";
+        };
+        "aarch64-linux" = {
+          os = "linux";
+          arch = "arm64";
+          hash = "sha256-X03athDBqyAWs8Inzr2/bZSVFhSH5HOce5AJBZX0Zfc=";
+        };
+        "x86_64-darwin" = {
+          os = "darwin";
+          arch = "x64";
+          hash = "sha256-JvwwiRAEYD0JTu0R3l780Du9LvvDXBd/xyZI1dencBs=";
+        };
+        "aarch64-darwin" = {
+          os = "darwin";
+          arch = "arm64";
+          hash = "sha256-t793BwcLlQuh7F8a87tt4PKxlixQM5c9lAaKsCHvMBQ=";
+        };
+      }.${stdenv.hostPlatform.system};
+
+      officialNode = fetchurl {
+        url = "https://nodejs.org/dist/v${officialNodeVersion}/node-v${officialNodeVersion}-${officialNodeDist.os}-${officialNodeDist.arch}.tar.xz";
+        hash = officialNodeDist.hash;
+      };
+    in
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "deepseek-harness";
       # No stable tags exist yet (all releases are alpha/rc); pinned to the last
@@ -24,7 +60,26 @@ self: super: {
         pnpm
         pnpmConfigHook
         makeBinaryWrapper
+        xz
+      ]
+      # autoPatchelf fixes only the official node below (see dontAutoPatchelf);
+      # the workspace tree already runs as-is and must not be rewritten.
+      ++ lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ];
+
+      buildInputs = lib.optionals stdenv.hostPlatform.isLinux [
+        # libstdc++ for the official node's rpath (it links libstdc++.so.6
+        # dynamically; the glibc interpreter comes from stdenv itself).
+        stdenv.cc.cc.lib
       ];
+
+      dontAutoPatchelf = true;
+      # strip -S -p runs after the installPhase autoPatchelf and corrupts the
+      # patched official node (patchelf moved .dynstr out of its segment:
+      # "allocated section '.dynstr' not in segment" → runtime
+      # "undefined symbol: , version", exit 127; reproduced locally 2026-09).
+      # The upstream binary ships stripped already; $out/lib and $out/bin hold
+      # nothing else ELF (bin is a shell wrapper).
+      dontStrip = true;
 
       # Full workspace install (no --filter): the release build compiles every
       # package (host + client TS aggregates, web frontend, native addons).
@@ -98,12 +153,19 @@ self: super: {
           exit 1
         fi
 
+        # The official nodejs.org runtime (see officialNode): fix its ELF bits
+        # (interpreter/rpath — the tarball ships /lib64 ld and no store rpath).
+        # Patched here rather than in fixup so installCheck can run it.
+        mkdir -p $out/lib/official-node
+        tar -xJf ${officialNode} --strip-components=1 -C $out/lib/official-node
+        ${lib.optionalString stdenv.hostPlatform.isLinux "autoPatchelf -- $out/lib/official-node/bin/node"}
+
         # The launcher entry (apps/cli) is a plain ESM script whose entry guard
         # is `import.meta.main` — needs Node >= 22.19/24 (see upstream engines;
         # older nodes silently exit 0 without printing anything).
         mkdir -p $out/bin
-        makeWrapper ${nodejs}/bin/node $out/bin/dsh \
-          --prefix PATH : ${lib.makeBinPath [ nodejs ]} \
+        makeWrapper $out/lib/official-node/bin/node $out/bin/dsh \
+          --prefix PATH : "$out/lib/official-node/bin:${lib.makeBinPath [ nodejs ]}" \
           --add-flags "$out/share/deepseek-harness/apps/cli/lib/bin.js"
 
         runHook postInstall
@@ -123,6 +185,16 @@ self: super: {
           *) echo "ERROR: unexpected dsh version: $v" >&2; exit 1 ;;
         esac
         $out/bin/dsh --help > /dev/null
+
+        # The boot resolves Node's internal ESM/CJS loader modules through
+        # node-addon-require-builtin; on a wrong node binary this throws
+        # Unsupported/no-getter before any profile can start.
+        $out/lib/official-node/bin/node -e "
+          const { createRequire } = require('node:module');
+          const req = createRequire('$out/share/deepseek-harness/apps/cli/lib/bin.js');
+          req('node-addon-require-builtin').requireBuiltin('internal/modules/esm/loader');
+          console.log('requireBuiltin smoke => ok');
+        "
 
         runHook postInstallCheck
       '';
