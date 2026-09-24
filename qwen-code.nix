@@ -2,28 +2,25 @@
 self: super: {
   qwen-code =
     with super;
-    buildNpmPackage (finalAttrs: {
+    stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.24.0";
+      version = "0.24.4";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        tag = "v${finalAttrs.version}";
-        hash = "sha256-FwZZ5Md1uqYwKG2LpCwo6k1IWa50+1G5tFFEa9PORPg=";
+        tag = "v${version}";
+        hash = "sha256-8Twmne99CJ9OE0z7t/fmPPa+FDvPDK34+8ma7ePV0aA=";
       };
 
-      npmDepsFetcherVersion = 2;
-      npmDepsHash = "sha256-w0hflbYxUH4fRZNW7Tef9ZyBvPnRorufkwxCT1R0wtE=";
-
-      # npm 11 incompatible with fetchNpmDeps
-      # https://github.com/NixOS/nixpkgs/issues/474535
-      nodejs = nodejs_22;
+      # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
+      # fetchPnpmDeps + consumer flow via the hook; pnpm >= 11 requires fetcher version 4.
+      pnpm = pnpm_11;
 
       nativeBuildInputs = [
-        jq
-        pkg-config
-        git
+        nodejs
+        pnpm
+        pnpmConfigHook
       ];
 
       buildInputs = [
@@ -32,90 +29,38 @@ self: super: {
         libsecret
       ];
 
-      postPatch = ''
-        # patches below remove node-pty and keytar dependencies which cause build fail on Darwin
-        # should be conditional on platform but since package-lock.json is patched it changes its hash
-        # though seems like these dependencies are not really required by the package
-        ${jq}/bin/jq '
-          del(.packages."node_modules/node-pty") |
-          del(.packages."node_modules/@lydell/node-pty") |
-          del(.packages."node_modules/@lydell/node-pty-darwin-arm64") |
-          del(.packages."node_modules/@lydell/node-pty-darwin-x64") |
-          del(.packages."node_modules/@lydell/node-pty-linux-arm64") |
-          del(.packages."node_modules/@lydell/node-pty-linux-x64") |
-          del(.packages."node_modules/@lydell/node-pty-win32-arm64") |
-          del(.packages."node_modules/@lydell/node-pty-win32-x64") |
-          del(.packages."node_modules/keytar") |
-          walk(
-            if type == "object" and has("dependencies") then
-              .dependencies |= with_entries(select(.key | (contains("node-pty") | not) and (contains("keytar") | not)))
-            elif type == "object" and has("optionalDependencies") then
-              .optionalDependencies |= with_entries(select(.key | (contains("node-pty") | not) and (contains("keytar") | not)))
-            else .
-            end
-          ) |
-          walk(
-            if type == "object" and has("peerDependencies") then
-              .peerDependencies |= with_entries(select(.key | (contains("node-pty") | not) and (contains("keytar") | not)))
-            else .
-            end
-          )
-        ' package-lock.json > package-lock.json.tmp && mv package-lock.json.tmp package-lock.json
-      '';
+      # Full monorepo install (no --filter): devDependencies are needed at build time
+      # (tsx for generate-settings-schema.ts, esbuild plugins) and all runtime externals must be present.
+      pnpmWorkspaces = [ ];
 
-      postConfigure = ''
-        # Provide stub type declaration for @lydell/node-pty (needed by core tsc, but native addon removed)
-        mkdir -p node_modules/@lydell/node-pty
-        cat > node_modules/@lydell/node-pty/node-pty.d.ts << 'ENDOFPTY'
-        import type { EventEmitter } from 'node:events';
-        export interface IPty {
-          pid: number;
-          write(data: string): void;
-          resize(cols: number, rows: number): void;
-          kill(signal?: string): void;
-          onData: EventEmitter<string>;
-          onExit: EventEmitter<{ exitCode: number; signal?: number }>;
-        }
-        export function spawn(command: string, args?: string[], options?: Record<string, unknown>): IPty;
-        export {};
-        ENDOFPTY
-        echo '{"name":"@lydell/node-pty","version":"1.2.0-beta.10","main":"node-pty.d.ts","types":"node-pty.d.ts"}' > node_modules/@lydell/node-pty/package.json
-
-        # Patch all shebangs recursively (workspace bins in sub-dirs have /usr/bin/env)
-        patchShebangs .
-      '';
+      pnpmDeps = fetchPnpmDeps {
+        inherit pname version src pnpm;
+        pnpmWorkspaces = [ ];
+        fetcherVersion = 4;
+        # FOD-computed narHash of the materialized node_modules (revealed by a stub-hash build).
+        hash = "sha256-m6sOBjtFGWpwzjANu5+YEcLe6bhnSMzgkn6FpYp+y7o=";
+      };
 
       buildPhase = ''
         runHook preBuild
 
-        # Build internal packages in dependency order (mirrors scripts/build.js)
-        # 1. core (foundation package)
-        npm run build --workspace=packages/core
-        # 2. channel-base (base channel infrastructure)
-        npm run build --workspace=packages/channels/base
-        # 3. channel adapters (depend on channel-base)
-        npm run build --workspace=packages/channels/telegram
-        npm run build --workspace=packages/channels/weixin
-        npm run build --workspace=packages/channels/dingtalk
-        npm run build --workspace=packages/channels/wecom
-        npm run build --workspace=packages/channels/feishu
-        npm run build --workspace=packages/channels/qqbot
-        npm run build --workspace=packages/channels/github
-        npm run build --workspace=packages/channels/dws
-        npm run build --workspace=packages/channels/gitlab
-        # 4. audio-capture (native microphone backend)
-        npm run build --workspace=packages/audio-capture
-        # 5. acp-bridge (depends on core)
-        npm run build --workspace=packages/acp-bridge
-        # 6. sdk-typescript (build-time dep)
-        npm run build --workspace=packages/sdk-typescript
-        # 7. web-shell (document renderer, required by web-templates)
-        npm run build --workspace=packages/web-shell
-        # 8. web-templates (embeddable web templates)
-        npm run build --workspace=packages/web-templates
+        export NODE_OPTIONS="--max-old-space-size=4096"
 
-        npm run generate
-        npm run bundle
+        # scripts/build.js (cli-only): generate git commit info, then build the cli closure (+ repl-mcp + channel-plugin-example).
+        node scripts/generate-git-commit-info.js
+
+        # Upstream applies patches/ink+7.0.3.patch in root postinstall via patch-package; Nixpkgs' pnpm hooks disable lifecycle scripts, so run it explicitly (offline, local only).
+        ./node_modules/.bin/patch-package || pnpm --offline exec patch-package
+
+        pnpm -r --filter "{./packages/cli}..." \
+             --filter "@qwen-code/node-repl-mcp" \
+             --filter "@qwen-code/channel-plugin-example" run build
+
+        # The settings-schema step of "pnpm generate".
+        node --import tsx/esm scripts/generate-settings-schema.ts
+
+        # The bundle step: esbuild + copy assets into dist/.
+        node esbuild.config.js && node scripts/copy_bundle_assets.js
 
         runHook postBuild
       '';
@@ -125,13 +70,44 @@ self: super: {
 
         mkdir -p $out/bin $out/share/qwen-code
         cp -r dist/* $out/share/qwen-code/
-        # Install production dependencies only
-        npm prune --production
-        cp -r node_modules $out/share/qwen-code/
-        # Remove broken symlinks that cause issues in Nix environment
-        find $out/share/qwen-code/node_modules -type l -delete || true
+
+        # pnpm keeps dependencies in a virtual store (node_modules/.pnpm) with relative links;
+        # materialize everything as plain files so the copy is self-contained and leaves no symlinks.
+        nm=$out/share/qwen-code/node_modules
+        mkdir -p "$nm"
+        tar -C node_modules --dereference -cf - . | tar -xf - -C $nm
+
+        # esbuild leaves these packages unbundled; they resolve at runtime from dist/cli.js, so they must be top-level entries in node_modules.
+        # The ones declared by the cli workspace (not root) only live inside .pnpm -- hoist them up along with sibling deps.
+        for pkg in \
+          "@teddyzhu/clipboard" \
+          "@teddyzhu/clipboard-darwin-arm64" \
+          "@teddyzhu/clipboard-darwin-x64" \
+          "@teddyzhu/clipboard-linux-arm64-gnu" \
+          "@teddyzhu/clipboard-linux-x64-gnu" \
+          "@teddyzhu/clipboard-win32-arm64-msvc" \
+          "@teddyzhu/clipboard-win32-x64-msvc" \
+          "sharp"; do
+          esc=$(printf '%s' "$pkg" | tr '/' '+')
+          if ! d=$(ls -d "$nm/.pnpm/$esc@*" 2>/dev/null | head -1); then continue; fi
+          cp -aR "$d/node_modules/." "$nm/"
+        done
+
+        # @qwen-code/audio-capture is a "file:" dep of packages/cli; pnpm materializes it under cli's own node_modules (workspace link). Copy its built contents into $nm, dereferencing any symlinks.
+        ac_dir="packages/cli/node_modules/@qwen-code/audio-capture"
+        test -d "$ac_dir" || { echo "MISSING audio-capture materialization: $ac_dir" >&2; exit 1; }
+        mkdir -p "$nm/@qwen-code/audio-capture"
+        tar -C "$ac_dir" --dereference -cf - . | tar -xf - -C "$nm/@qwen-code/audio-capture"
+
+        # Everything else is bundled into dist/; the .pnpm store itself can go.
+        rm -rf "$nm/.pnpm"
+
+        for p in sharp "@qwen-code/audio-capture" "@teddyzhu/clipboard"; do
+          test -d "$nm/$p" || { echo "MISSING runtime external: $p" >&2; exit 1; }
+        done
+
         patchShebangs $out/share/qwen-code
-        ln -s $out/share/qwen-code/cli.js $out/bin/qwen
+        ln -sf $out/share/qwen-code/cli.js $out/bin/qwen
 
         runHook postInstall
       '';
