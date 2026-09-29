@@ -3,50 +3,107 @@ self: super: {
   qtcreator_my =
     with super;
     let
-      src' = fetchFromGitHub {
+      pname = "qtcreator";
+      version = "25.0.0-unstable-2026-09-29";
+
+      src = fetchFromGitHub {
         owner = "qt-creator";
         repo = "qt-creator";
         rev = "f1256259f42205009216ae3418340c7518069213";
         hash = "sha256-wp7n1navYx2ws9Oz3CnaQcXLuSwERPW0M0Bx3ewZ04U=";
       };
-      # Pre-built go modules — same deps as qtcreator 20.0.1
-      goModules' = (buildGoModule {
+
+      # Go modules for cmdbridge (same deps as 20.0.1, vendor hash unchanged)
+      goModules = (buildGoModule {
         pname = "gocmdbridge";
         version = "0.0.0";
-        src = src';
+        inherit src;
         vendorHash = "sha256-PUMQdVlf6evLjzs263SAecIA3aMuMbjIr1xEztiwmro=";
         setSourceRoot = ''
           sourceRoot=$(echo */src/libs/gocmdbridge/server)
         '';
       }).goModules;
-    in
-    qtcreator.overrideAttrs (old: rec {
-      version = "25.0.0-unstable-2026-09-29";
-      src = src';
-      goModules = goModules';
-      nativeBuildInputs =
-        with qt6Packages;
-        old.nativeBuildInputs or []
-        ++ [
-          wrapQtAppsHook
-          wrapGAppsHook3
-        ];
-      buildInputs = with qt6Packages; old.buildInputs or [] ++ [ gsettings-desktop-schemas ];
-      # Vendor mode enabled (inherited). The pre-built vendor from buildGoModule
-      # has correct files but go 1.21+ vendor consistency checks are strict about
-      # modules.txt matching go.mod exactly. We populate vendor and overwrite
-      # modules.txt with the correct content.
+
+      # Qt6 from nixpkgs
+      qt6Pkgs = qt6Packages;
+
+    in stdenv.mkDerivation (finalAttrs: {
+      inherit pname version src;
+
+      nativeBuildInputs = [
+        cmake
+        pkg-config
+        ninja
+        go
+        python3
+        (qt6Pkgs.qttools.override { withClang = true; })
+        qt6Pkgs.wrapQtAppsHook
+        wrapGAppsHook3
+      ];
+
+      buildInputs = [
+        # Qt6
+        qt6Pkgs.qtbase
+        qt6Pkgs.qtdoc
+        qt6Pkgs.qtsvg
+        qt6Pkgs.qtquick3d
+        qt6Pkgs.qtwebengine
+        qt6Pkgs.qtwayland
+        qt6Pkgs.qtserialport
+        qt6Pkgs.qtshadertools
+        qt6Pkgs.qt5compat
+        qt6Pkgs.qtdeclarative
+        qt6Pkgs.qtquicktimeline
+        qt6Pkgs.qtnetworkauth
+        # Optional: Qt HttpServer for MCP server SSE transport
+        qt6Pkgs.qthttpserver
+        # Optional: Qt Positioning for Android/ML features
+        qt6Pkgs.qtpositioning
+
+        # LLVM/Clang toolchain for code model
+        llvmPackages_21.libclang
+        llvmPackages_21.llvm
+
+        # C++ libs
+        yaml-cpp
+        litehtml
+        libsecret
+        gumbo
+        rustc-demangle
+        elfutils
+
+        # perf profiler
+        perf
+
+        # GTK/GNOME integration
+        gsettings-desktop-schemas
+      ];
+
+      outputs = [ "out" "dev" ];
+
+      cmakeFlags = [
+        (lib.cmakeFeature "CMAKE_INSTALL_DATAROOTDIR" "${placeholder "out"}/share")
+        (lib.cmakeBool "QT_NO_FIND_QMLSC" true)
+        (lib.cmakeBool "WITH_DOCS" true)
+        (lib.cmakeBool "BUILD_DEVELOPER_DOCS" true)
+        (lib.cmakeBool "BUILD_QBS" false)
+        (lib.cmakeBool "QTC_CLANG_BUILDMODE_MATCH" true)
+        (lib.cmakeBool "CLANGTOOLING_LINK_CLANG_DYLIB" true)
+        (lib.cmakeBool "CMDBRIDGE_BUILD_VENDOR_MODE" true)
+        # Enable new features
+        (lib.cmakeBool "BUILD_EXECUTABLE_CMDBRIDGE" true)
+      ];
+
+      # Vendor mode requires correct modules.txt; go 1.21+ strict checking
       preConfigure = ''
         export GOCACHE=$TMPDIR/go-cache
         export GOPATH="$TMPDIR/go"
         vendor_dir=src/libs/gocmdbridge/server/go/vendor
-        # Pre-built vendor files come from /nix/store (read-only); remove
-        # any existing dir and re-create with writable copies
         chmod -R u+w src/libs/gocmdbridge/server/go 2>/dev/null || true
         rm -rf "$vendor_dir"
         mkdir -p "$vendor_dir"
-        cp -r --no-preserve=mode ${goModules'}/. "$vendor_dir/"
-        # Overwrite modules.txt with one that matches go.mod exactly
+        cp -r --no-preserve=mode ${goModules}/. "$vendor_dir/"
+        # Generate modules.txt matching go.mod exactly (go 1.21+ requirement)
         cat > "$vendor_dir/modules.txt" << 'MODULESEOF'
 # github.com/fsnotify/fsnotify v1.7.0
 ## explicit; go 1.17
@@ -63,5 +120,36 @@ golang.org/x/sys/unix
 golang.org/x/sys/windows
 MODULESEOF
       '';
+
+      postInstall = ''
+        # Install development headers with correct prefix
+        cmake . $cmakeFlags -DCMAKE_INSTALL_PREFIX="''${!outputDev}"
+        cmake --install . --prefix "''${!outputDev}" --component Devel
+      '';
+
+      postFixup = ''
+        # Remove prefix from QtC config for 3rd-party plugin paths
+        substituteInPlace "''${!outputDev}/lib/cmake/QtCreator/QtCreatorConfig.cmake" \
+          --replace "$out/" ""
+      '';
+
+      qtWrapperArgs = [
+        "--set-default PERFPROFILER_PARSER_FILEPATH ${lib.getBin perf}/bin"
+      ];
+
+      meta = {
+        description = "Cross-platform IDE tailored to the needs of Qt developers (master branch)";
+        longDescription = ''
+          Qt Creator is a cross-platform IDE (integrated development environment)
+          tailored to the needs of Qt developers. This build tracks the master branch
+          and includes the latest features: ACP/AI Copilot integration, MCP server,
+          Java/JDWP debugger, QDoc editor, WSL support, HarmonyOS support, and more.
+        '';
+        homepage = "https://wiki.qt.io/Qt_Creator";
+        license = lib.licenses.gpl3Only;
+        maintainers = with lib.maintainers; [ ];
+        platforms = lib.platforms.linux;
+        mainProgram = "qtcreator";
+      };
     });
 }
