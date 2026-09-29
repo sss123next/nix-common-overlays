@@ -1,0 +1,204 @@
+From 4027669b16dc9c8eb0e877a1e8ebe1d8ecdb317c Mon Sep 17 00:00:00 2001
+From: sss <sss@dark-alexandr.net>
+Date: Wed, 22 Jul 2026 16:48:14 +0300
+Subject: [PATCH 1/2] use ctrl+sec instead of esc to stop generation
+
+---
+ public/scripts/RossAscends-mods.js    | 2 +-
+ public/scripts/templates/hotkeys.html | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/public/scripts/RossAscends-mods.js b/public/scripts/RossAscends-mods.js
+index 8ad8072dd..2e83e06e0 100644
+--- a/public/scripts/RossAscends-mods.js
++++ b/public/scripts/RossAscends-mods.js
+@@ -1173,7 +1173,7 @@ export function initRossMods() {
+             }
+         }
+ 
+-        if (event.key == 'Escape') { //closes various panels
++        if (event.ctrlKey && event.key == 'Escape') { //closes various panels
+             //dont override Escape hotkey functions from script.js
+             //"close edit box" and "cancel stream generation".
+             if ($('#curEditTextarea').is(':visible') || $('#mes_stop').is(':visible')) {
+diff --git a/public/scripts/templates/hotkeys.html b/public/scripts/templates/hotkeys.html
+index 569ca5a92..08be0d0ff 100644
+--- a/public/scripts/templates/hotkeys.html
++++ b/public/scripts/templates/hotkeys.html
+@@ -9,7 +9,7 @@
+     <li><kbd data-i18n="help_hotkeys_9">Enter</kbd> <span data-i18n="help_hotkeys_10">(with chat bar selected)</span> = <span data-i18n="help_hotkeys_10_1">send your message to AI</span></li>
+     <li><kbd data-i18n="help_hotkeys_11">Ctrl+Enter</kbd> = <span data-i18n="help_hotkeys_12">Regenerate the last AI response</span></li>
+     <li><kbd data-i18n="help_hotkeys_13">Alt+Enter</kbd> = <span data-i18n="help_hotkeys_14">Continue the last AI response</span></li>
+-    <li><kbd data-i18n="help_hotkeys_15">Escape</kbd> = <span data-i18n="help_hotkeys_16">stop AI response generation, close UI panels, cancel message edit</span></li>
++    <li><kbd data-i18n="help_hotkeys_15">Ctrl+Escape</kbd> = <span data-i18n="help_hotkeys_16">stop AI response generation, close UI panels, cancel message edit</span></li>
+     <li><kbd data-i18n="help_hotkeys_17">Ctrl+Shift+Up</kbd> = <span data-i18n="help_hotkeys_18">Scroll to context line</span></li>
+     <li><kbd data-i18n="help_hotkeys_19">Ctrl+Shift+Down</kbd> = <span data-i18n="help_hotkeys_20">Scroll chat to bottom</span></li>
+ </ul>
+-- 
+2.55.0
+
+
+From 9380102ed47a1b1e6c6a8d5371f4cdc7fc016dc0 Mon Sep 17 00:00:00 2001
+From: sss <sss@dark-alexandr.net>
+Date: Thu, 24 Sep 2026 00:23:02 +0300
+Subject: [PATCH 2/2] Remap generation stop from Escape to Ctrl+Escape
+
+Plain Escape no longer aborts AI response generation: it only cancels/
+saves an active message edit (with stopImmediatePropagation so it does
+not cascade into panel-closing handlers).
+
+Stopping generation is now a last-resort fallback at the end of the
+Ctrl+Escape chain in RossAscends-mods.js, fired only when no popup or
+legacy panel is open and #mes_stop is visible, preserving the original
+swipe-left logic afterwards.
+
+Update help_hotkeys_15 in ru/fr/zh locales to match hotkeys.html docs
+(Ctrl+Escape = stop generation).
+---
+ public/locales/fr-fr.json          |  2 +-
+ public/locales/ru-ru.json          |  2 +-
+ public/locales/zh-cn.json          |  2 +-
+ public/locales/zh-tw.json          |  2 +-
+ public/script.js                   | 15 +++++++--------
+ public/scripts/RossAscends-mods.js | 23 ++++++++++++++++-------
+ 6 files changed, 27 insertions(+), 19 deletions(-)
+
+diff --git a/public/locales/fr-fr.json b/public/locales/fr-fr.json
+index 5a0cb85ee..0c7b14da3 100644
+--- a/public/locales/fr-fr.json
++++ b/public/locales/fr-fr.json
+@@ -1871,7 +1871,7 @@
+     "help_hotkeys_12": "Régénérer la dernière réponse de l'IA",
+     "help_hotkeys_13": "Alt+Entrée",
+     "help_hotkeys_14": "Poursuivre la dernière réponse de l'IA",
+-    "help_hotkeys_15": "Echap",
++    "help_hotkeys_15": "Ctrl+Echap",
+     "help_hotkeys_16": "arrêter la génération de réponses de l'IA, fermer les panneaux de l'interface utilisateur, annuler l'édition du message",
+     "help_hotkeys_17": "Ctrl+Maj+Haut",
+     "help_hotkeys_18": "Défiler jusqu'à la ligne de contexte",
+diff --git a/public/locales/ru-ru.json b/public/locales/ru-ru.json
+index 01553d75f..26bbc00b1 100644
+--- a/public/locales/ru-ru.json
++++ b/public/locales/ru-ru.json
+@@ -1481,7 +1481,7 @@
+     "help_hotkeys_9": "Enter",
+     "help_hotkeys_11": "Ctrl+Enter",
+     "help_hotkeys_13": "Alt+Enter",
+-    "help_hotkeys_15": "Escape",
++    "help_hotkeys_15": "Ctrl+Escape",
+     "Import Characters": "Импорт персонажей",
+     "char_import_8": "Персонаж с RisuRealm (прямая ссылка)",
+     "Supports importing multiple characters.": "Можно импортировать несколько персонажей за раз.",
+diff --git a/public/locales/zh-cn.json b/public/locales/zh-cn.json
+index 15327fb67..abcbf5158 100644
+--- a/public/locales/zh-cn.json
++++ b/public/locales/zh-cn.json
+@@ -3344,7 +3344,7 @@
+     "help_hotkeys_12": "重新生成最后的 AI 响应",
+     "help_hotkeys_13": "Alt+Enter",
+     "help_hotkeys_14": "继续上一次 AI 响应",
+-    "help_hotkeys_15": "Esc",
++    "help_hotkeys_15": "Ctrl+Esc",
+     "help_hotkeys_16": "停止 AI 响应生成、关闭 UI 面板、取消消息编辑",
+     "help_hotkeys_17": "Ctrl+Shift+上",
+     "help_hotkeys_18": "滚动到上下文行",
+diff --git a/public/locales/zh-tw.json b/public/locales/zh-tw.json
+index 242dc7270..f086dfccd 100644
+--- a/public/locales/zh-tw.json
++++ b/public/locales/zh-tw.json
+@@ -1979,7 +1979,7 @@
+     "help_hotkeys_12": "重新生成最後一則 AI 回應",
+     "help_hotkeys_13": "Alt+Enter",
+     "help_hotkeys_14": "繼續生成最後一則 AI 回應",
+-    "help_hotkeys_15": "Esc 鍵",
++    "help_hotkeys_15": "Ctrl+Esc 鍵",
+     "help_hotkeys_16": "停止 AI 回應生成，關閉使用者介面，取消訊息編輯",
+     "help_hotkeys_17": "Ctrl+Shift+↑",
+     "help_hotkeys_18": "滾動到上下文行",
+diff --git a/public/script.js b/public/script.js
+index 5a73f7e78..f665904fe 100644
+--- a/public/script.js
++++ b/public/script.js
+@@ -12329,24 +12329,23 @@ jQuery(async function () {
+         if (e.key === 'Escape' && !e.originalEvent.isComposing) {
+             const isEditVisible = $('#curEditTextarea').is(':visible') || $('.reasoning_edit_textarea').length > 0;
+             if (isEditVisible && power_user.auto_save_msg_edits === false) {
++                // Stop propagation so a Ctrl+Escape that only cancels the edit
++                // doesn't also trigger panel closing / generation stop handlers.
++                e.stopImmediatePropagation();
+                 closeMessageEditor('all');
+                 $('#send_textarea').trigger('focus');
+                 return;
+             }
+             if (isEditVisible && power_user.auto_save_msg_edits === true) {
++                e.stopImmediatePropagation();
+                 chatElement.find(`.mes[mesid="${this_edit_mes_id}"] .mes_edit_done`).trigger('click');
+                 closeMessageEditor('reasoning');
+                 $('#send_textarea').trigger('focus');
+                 return;
+             }
+-            if (this_edit_mes_id === undefined && $('#mes_stop').is(':visible')) {
+-                $('#mes_stop').trigger('click');
+-                if (chat.length === 0) return;
+-                const lastMessage = chat[chat.length - 1];
+-                if (Array.isArray(lastMessage.swipes) && lastMessage.swipe_id == lastMessage.swipes.length) {
+-                    $('.last_mes .swipe_left').trigger('click');
+-                }
+-            }
++            // Plain Escape must never abort generation: it only cancels an active
++            // message edit above. Stopping generation is bound to Ctrl+Escape and is
++            // handled as the last resort in RossAscends-mods.js (after panels are closed).
+         }
+     });
+ 
+diff --git a/public/scripts/RossAscends-mods.js b/public/scripts/RossAscends-mods.js
+index 2e83e06e0..67149be66 100644
+--- a/public/scripts/RossAscends-mods.js
++++ b/public/scripts/RossAscends-mods.js
+@@ -20,6 +20,7 @@ import {
+     sendTextareaMessage,
+     doNavbarIconClick,
+     isSwipingAllowed,
++    chat,
+ } from '../script.js';
+ 
+ import {
+@@ -1174,13 +1175,8 @@ export function initRossMods() {
+         }
+ 
+         if (event.ctrlKey && event.key == 'Escape') { //closes various panels
+-            //dont override Escape hotkey functions from script.js
+-            //"close edit box" and "cancel stream generation".
+-            if ($('#curEditTextarea').is(':visible') || $('#mes_stop').is(':visible')) {
+-                console.debug('escape key, but deferring to script.js routines');
+-                return;
+-            }
+-
++            //Escape edit-box cancel is handled in script.js (it stops propagation while an edit is open),
++            //so here we only handle panel closing first, then stopping the stream as a last resort.
+             if ($('#dialogue_popup').is(':visible')) {
+                 if ($('#dialogue_popup_cancel').is(':visible')) {
+                     $('#dialogue_popup_cancel').trigger('click');
+@@ -1271,6 +1267,19 @@ export function initRossMods() {
+                 $('.draggable:first').remove();
+                 return;
+             }
++
++            // No panel was open to close: stop the generation instead.
++            // Plain Escape intentionally never aborts generation (see script.js),
++            // so typing in inputs or an open UI can't kill a running response by accident.
++            if (!event.isComposing && $('#mes_stop').is(':visible')) {
++                $('#mes_stop').trigger('click');
++                if (chat.length === 0) return;
++                const lastMessage = chat[chat.length - 1];
++                if (Array.isArray(lastMessage.swipes) && lastMessage.swipe_id == lastMessage.swipes.length) {
++                    $('.last_mes .swipe_left').trigger('click');
++                }
++                return;
++            }
+         }
+ 
+ 
+-- 
+2.55.0
+
