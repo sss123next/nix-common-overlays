@@ -4,13 +4,17 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.24.6";
+      # No newer release tag yet (package.json on main is still 0.24.6); pinned to
+      # the last main commit instead, upstream version embedded by the build is 0.24.6.
+      version = "0.24.6-unstable-2026-09-29";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        tag = "v${version}";
-        hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";
+        # main @ 2026-09-29, "fix(core): isolate declarative subagent hooks by invocation (#12949)"
+        # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
+        rev = "31f6047e9d544f4f4a0fd9d46ee4a336da3853c3";
+        hash = "sha256-2+pbPfH+xtE/HBiOBTPghJbCuQ35sbBZXXQ0Rr2gJDk=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -27,7 +31,9 @@ self: super: {
         ripgrep
         glib
         libsecret
-      ];
+      ]
+      # exec'ed by the postPatch below (POSIX ps replacement); Linux-only (procps).
+      ++ lib.optionals stdenv.hostPlatform.isLinux [ procps ];
 
       # Full monorepo install (no --filter): devDependencies are needed at build time
       # (tsx for generate-settings-schema.ts, esbuild plugins) and all runtime externals must be present.
@@ -38,8 +44,24 @@ self: super: {
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
         # FOD-computed narHash of the materialized node_modules (revealed by a stub-hash build).
-        hash = "sha256-m6sOBjtFGWpwzjANu5+YEcLe6bhnSMzgkn6FpYp+y7o=";
+        hash = "sha256-gfPJHK9hcd8g+IBSlUbxTteWjuHDastVKeAV9FZik0Q=";
       };
+
+      # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
+      # the desktop-relay process identity probe). /bin/ps does not exist on NixOS, so the ACP
+      # child process-tree snapshot taken during daemon shutdown fails with
+      # "spawn /bin/ps ENOENT" and the daemon logs "ACP child shutdown failed"/"shutdown
+      # incomplete" (children still die, but only forcefully). Point it at procps: the store path
+      # is substituted into the bundle, so it is scanned into the runtime closure automatically.
+      # --replace-fail on the process-registry file makes the next upstream move of that constant
+      # a loud build error instead of a silent regression.
+      postPatch = lib.optionalString stdenv.hostPlatform.isLinux ''
+        psBin=${lib.getExe' procps "ps"}
+        substituteInPlace packages/acp-bridge/src/process-registry.ts \
+          --replace-fail "'/bin/ps'" "'$psBin'"
+        substituteInPlace packages/node-repl/src/desktop-relay/runtime.ts \
+          --replace "'/bin/ps'" "'$psBin'"
+      '';
 
       buildPhase = ''
         runHook preBuild
