@@ -70,11 +70,11 @@ self: super: {
           outputHashMode = "recursive";
           # Calibrated against our nixpkgs bun 1.4.x (the official hashes.json keys to a different
           # bun ABI — opencode issue #49063), so values are pinned from local `got:` output, not
-          # upstream. x86_64-linux re-pinned for the v2.0.16 dep delta; other systems stay
+          # upstream. x86_64-linux re-pinned for the v2.0.19 dep delta; other systems stay
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-6OxuEF0PYZa578y3eFwljzUY4mLmIwWKKXfghfrCm8Q=";
+            "x86_64-linux"   = "sha256-zyJScWu0B1Iykk+e8SYUM/S+2Bk7KzEomJ79XjtXl6E=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -92,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.0.18";
+      version = "2.0.19";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -102,8 +102,8 @@ self: super: {
         repo = "opencode";
         tag = "v${finalAttrs.version}";
         # Recursive hash of the unpacked tree (fetchFromGitHub semantics); the codeload
-        # tarball SRI is sha256-fiTlhM4wDY6L9mLis47vA1juRtBYEzLlF+d+pk6GwHc=.
-        hash = "sha256-QyzzA9SUnnCunYucJPjZAw/EkUN1EKoDcrFalIOYVps=";
+        # tarball SRI is sha256-jUctriDwlHJtoqVkvZvmqLroKOaCRQ20zh3HpHKGaBE=.
+        hash = "sha256-jUctriDwlHJtoqVkvZvmqLroKOaCRQ20zh3HpHKGaBE=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
