@@ -41,15 +41,14 @@ self: super: {
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "deepseek-harness";
       # No stable tags exist yet (all releases are alpha/rc); pinned to the last
-      # master commit instead, upstream version embedded by the build is 0.1.7-rc.2.
-      version = "0.1.7-rc.2-unstable-2026-09-24";
+      # master commit instead, upstream version embedded by the build is 0.2.0-rc.1.
+      version = "0.2.0-rc.1-unstable-2026-09-28";
 
       src = fetchFromGitHub {
         owner = "deepseek-ai";
         repo = "deepseek-harness";
-        rev = "477b4f420553e8a52c2fbccc464d7561b239c443";
-        # Recursive hash of the unpacked tree (fetchFromGitHub semantics).
-        hash = "sha256-bWeyipPsY5KclNGJPIttZ9CKRXCqkNIoKmK8VKN7FnI=";
+        rev = "4878cdabd87d4041bdaff61d04c966883b9fd07a";
+        hash = "sha256-J1uuMfQe9wWKCDNV3h3VimS9xcNbzdKC8qzeSfYJdGo=";
       };
 
       # packageManager: pnpm@11.7.0; pnpm >= 11 needs fetcher version 4.
@@ -91,14 +90,14 @@ self: super: {
         fetcherVersion = 4;
         # FOD hash of the materialized store; pinned from the stub-hash build's
         # `got:` output.
-        hash = "sha256-rDV6HxYwnPROBOP7/JY/cZ7kqmxv0zxOncjJghIvvM4=";
+        hash = "sha256-nf943HpUoW1Ai+UEZd9MsO/4ZmvpesFkHaoNUtY6Iwc=";
       };
 
       env.NODE_OPTIONS = "--max-old-space-size=4096";
       # fetchFromGitHub provides no .git; client-build-environment.ts reads this
       # public value instead of spawning `git rev-parse HEAD`, and its dirty
       # probe treats a missing git as "no metadata" (no dirty marker).
-      env.DSH_CLIENT_COMMIT_HASH = "477b4f420553e8a52c2fbccc464d7561b239c443";
+      env.DSH_CLIENT_COMMIT_HASH = "4878cdabd87d4041bdaff61d04c966883b9fd07a";
 
       # `pnpm run build` (scripts/build.ts) = build:native-system (flock Node-API
       # addon; needs the node headers next to process.execPath) + build:lib (tsc
@@ -181,7 +180,7 @@ self: super: {
         v=$($out/bin/dsh --version)
         echo "dsh --version => $v"
         case "$v" in
-          0.1.7-rc.2*) ;;
+          0.2.0-rc.1*) ;;
           *) echo "ERROR: unexpected dsh version: $v" >&2; exit 1 ;;
         esac
         $out/bin/dsh --help > /dev/null
