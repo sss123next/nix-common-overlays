@@ -41,14 +41,14 @@ self: super: {
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "deepseek-harness";
       # No stable tags exist yet (all releases are alpha/rc); pinned to the last
-      # master commit instead, upstream version embedded by the build is 0.2.0-rc.1.
-      version = "0.2.0-rc.1-unstable-2026-09-28";
+      # master commit instead, upstream version embedded by the build is 0.2.0-rc.2.
+      version = "0.2.0-rc.2-unstable-2026-09-29";
 
       src = fetchFromGitHub {
         owner = "deepseek-ai";
         repo = "deepseek-harness";
-        rev = "4878cdabd87d4041bdaff61d04c966883b9fd07a";
-        hash = "sha256-J1uuMfQe9wWKCDNV3h3VimS9xcNbzdKC8qzeSfYJdGo=";
+        rev = "639ed015397290b3745d163aafe02ffee4aa3f84";
+        hash = "sha256-ZtO+bdoYbIkIgLTge5Eh7KYwTVh8FpFAAvx58dSY1PI=";
       };
 
       # packageManager: pnpm@11.7.0; pnpm >= 11 needs fetcher version 4.
@@ -90,14 +90,14 @@ self: super: {
         fetcherVersion = 4;
         # FOD hash of the materialized store; pinned from the stub-hash build's
         # `got:` output.
-        hash = "sha256-nf943HpUoW1Ai+UEZd9MsO/4ZmvpesFkHaoNUtY6Iwc=";
+        hash = "sha256-+7jFaROKpN8XHFpulloK2lb0GsYXbEdMs/V7ZO9leKE=";
       };
 
       env.NODE_OPTIONS = "--max-old-space-size=4096";
       # fetchFromGitHub provides no .git; client-build-environment.ts reads this
       # public value instead of spawning `git rev-parse HEAD`, and its dirty
       # probe treats a missing git as "no metadata" (no dirty marker).
-      env.DSH_CLIENT_COMMIT_HASH = "4878cdabd87d4041bdaff61d04c966883b9fd07a";
+      env.DSH_CLIENT_COMMIT_HASH = "639ed015397290b3745d163aafe02ffee4aa3f84";
 
       # `pnpm run build` (scripts/build.ts) = build:native-system (flock Node-API
       # addon; needs the node headers next to process.execPath) + build:lib (tsc
@@ -170,7 +170,7 @@ self: super: {
         runHook postInstall
       '';
 
-      # The CLI reports the upstream package.json version (0.1.7-rc.1), not the
+      # The CLI reports the upstream package.json version (0.2.0-rc.2), not the
       # nix -unstable- suffix, so no versionCheckHook; check the entry point and
       # the version prefix manually instead.
       doInstallCheck = true;
@@ -180,7 +180,7 @@ self: super: {
         v=$($out/bin/dsh --version)
         echo "dsh --version => $v"
         case "$v" in
-          0.2.0-rc.1*) ;;
+          0.2.0-rc.2*) ;;
           *) echo "ERROR: unexpected dsh version: $v" >&2; exit 1 ;;
         esac
         $out/bin/dsh --help > /dev/null
