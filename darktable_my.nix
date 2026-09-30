@@ -38,6 +38,7 @@ self: super: {
           openmp
           self.shaderc_my
           potrace
+          libarchive
         ];
         patches = [ ];
         postPatch = lib.concatStringsSep "\n" [
