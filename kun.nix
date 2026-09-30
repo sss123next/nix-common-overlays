@@ -9,13 +9,13 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: {
       pname = "kun";
-      version = "0.3.10";
+      version = "0.3.12";
 
       src = fetchFromGitHub {
         owner = "KunAgent";
         repo = "Kun";
-        rev = "v0.3.10";
-        hash = "sha256-lZUxRzVaDO8Iq+YMHg6G7dxtJUK1SvHuHfacVLD94j4=";
+        rev = "v0.3.12";
+        hash = "sha256-6ITwbs733Tn6s8TaCRhalY2obxrZgJqzeICaZfuVfOU=";
       };
 
       # Two separate lockfiles — root (kun-gui workspaces) and kun/ subtree (CLI).
@@ -32,6 +32,7 @@ self: super: {
 
           nativeBuildInputs = [
             prefetch-npm-deps
+            nodejs
             rsync
           ];
 
@@ -60,7 +61,7 @@ self: super: {
 
           dontInstall = true;
           outputHashMode = "recursive";
-          hash = "sha256-bk3boogFoACtnxpzOm8abWUUIdxhzxZzXsKrbPG5ewQ=";
+          hash = "sha256-5iBUCu37vw2cl+qirFBLhWQem6Z3z1EbrZJLalq4FlY=";
         }
       );
 
@@ -80,6 +81,39 @@ self: super: {
         installShellFiles
         npmHooks.npmConfigHook
       ];
+
+      # Why BOTH of these are required (empirically, offline npm ci against the
+      # prefetched npmDeps cache):
+      #
+      #  * `--legacy-peer-deps` — without it npm ci fails with EUSAGE
+      #    ("lock file's @radix-ui/react-popover@1.1.23 does not satisfy
+      #    @radix-ui/react-popover@1.1.6"): the lockfile carries newer
+      #    @radix-ui/* versions than the pinned ranges recorded in
+      #    @excalidraw/excalidraw. Online npm can re-resolve; offline it can't.
+      #
+      #  * rxjs in `dependencies` — --legacy-peer-deps makes npm skip every
+      #    `peer: true` lockfile entry (1741 vs 1755 pkgs). rxjs is one of them
+      #    (a peer of @univerjs/core), and without node_modules/rxjs electron-vite
+      #    dies with "Rollup failed to resolve import rxjs from
+      #    node_modules/@univerjs/core/lib/es/facade.js". Promoting it to a
+      #    direct dependency makes npm install it (1742 pkgs) and lets
+      #    externalizeDepsPlugin externalize it in main/preload instead of
+      #    bundling it — node_modules is shipped in $out, so runtime resolves.
+      #
+      # Only package.json is touched here; package-lock.json stays byte-identical
+      # so npmConfigHook's consistency check against $npmDeps still passes.
+      postPatch = ''
+        node -e '
+          const fs = require("fs");
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          pkg.dependencies = pkg.dependencies || {};
+          if (!pkg.dependencies.rxjs) pkg.dependencies.rxjs = "^7.8.2";
+          fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+        '
+      '';
+
+      makeCacheWritable = true;
+      npmFlags = [ "--legacy-peer-deps" ];
 
       # Native modules compiled against Electron (better-sqlite3, node-pty,
       # tesseract.js, etc.) need a python for node-gyp.
