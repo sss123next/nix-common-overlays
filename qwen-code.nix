@@ -6,15 +6,15 @@ self: super: {
       pname = "qwen-code";
       # No newer release tag yet (package.json on main is still 0.24.6); pinned to
       # the last main commit instead, upstream version embedded by the build is 0.24.6.
-      version = "0.24.6-unstable-2026-09-29";
+      version = "0.24.6-unstable-2026-09-30";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-09-29, "fix(core): isolate declarative subagent hooks by invocation (#12949)"
+        # main @ 2026-09-30, "fix(core): honor NO_PROXY for usage-statistics RUM uploads (#13023)"
         # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
-        rev = "31f6047e9d544f4f4a0fd9d46ee4a336da3853c3";
-        hash = "sha256-2+pbPfH+xtE/HBiOBTPghJbCuQ35sbBZXXQ0Rr2gJDk=";
+        rev = "19684f37c07cb274f7abbf229a3bd0d284f0fa60";
+        hash = "sha256-R1G0Ziz95W4q9Hd9Fne0CTBTzcdV1y7aZN2UFSnwrvI=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
