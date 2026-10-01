@@ -13,8 +13,8 @@ self: super: {
         repo = "qwen-code";
         # main @ 2026-09-30, "fix(core): honor NO_PROXY for usage-statistics RUM uploads (#13023)"
         # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
-        rev = "19684f37c07cb274f7abbf229a3bd0d284f0fa60";
-        hash = "sha256-R1G0Ziz95W4q9Hd9Fne0CTBTzcdV1y7aZN2UFSnwrvI=";
+        rev = "a7deb01bcbd5a5c795bfccbf2bd0b4e445286b92";
+        hash = "";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -44,7 +44,7 @@ self: super: {
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
         # FOD-computed narHash of the materialized node_modules (revealed by a stub-hash build).
-        hash = "sha256-gfPJHK9hcd8g+IBSlUbxTteWjuHDastVKeAV9FZik0Q=";
+        hash = "";
       };
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and

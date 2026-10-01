@@ -100,10 +100,10 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "033b9ea56070c3e24cc20935165d20148e80d5e7";
+        rev = "0f9f0a9ae30ed50d2b66fe09a70ac5a0aae8c378";
         # Recursive hash of the unpacked tree (fetchFromGitHub semantics); the codeload
         # tarball SRI is sha256-d1iW+PD2EPQpf7z16Af6JYi20mo4o1gClkHvoL5elw0=.
-        hash = "sha256-d1iW+PD2EPQpf7z16Af6JYi20mo4o1gClkHvoL5elw0=";
+        hash = "sha256-0UKAK5Q30GiELscwLMrt+OSV5LiFlD1QzESi4TO4p8o=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
