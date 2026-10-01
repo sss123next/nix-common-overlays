@@ -70,11 +70,11 @@ self: super: {
           outputHashMode = "recursive";
           # Calibrated against our nixpkgs bun 1.4.x (the official hashes.json keys to a different
           # bun ABI — opencode issue #49063), so values are pinned from local `got:` output, not
-          # upstream. x86_64-linux re-pinned for the v2 branch HEAD dep delta; other systems stay
+          # upstream. x86_64-linux re-pinned for the v2 HEAD dep delta; other systems stay
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-aV8uT3GVOhHTL0ZQ4dLTOV3XdB1QPNfyFYFC3PF5haw=";
+            "x86_64-linux"   = "sha256-H6E2GqcXuaEzJnVpRrbXm4xE0BwjDfJ/2Foswyldcm4=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -102,8 +102,8 @@ self: super: {
         repo = "opencode";
         rev = "0f9f0a9ae30ed50d2b66fe09a70ac5a0aae8c378";
         # Recursive hash of the unpacked tree (fetchFromGitHub semantics); the codeload
-        # tarball SRI is sha256-d1iW+PD2EPQpf7z16Af6JYi20mo4o1gClkHvoL5elw0=.
-        hash = "sha256-0UKAK5Q30GiELscwLMrt+OSV5LiFlD1QzESi4TO4p8o=";
+        # tarball SRI is sha256-6yzAubr2Sq5Mpg6NHfC9PVruIuGe8BpZgEFN05sJuuA=.
+        hash = "sha256-6yzAubr2Sq5Mpg6NHfC9PVruIuGe8BpZgEFN05sJuuA=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
@@ -114,13 +114,15 @@ self: super: {
       # every native request opts out, like packages/cli/src/run/run.ts does.
       # Bump-dependent: must apply cleanly to the src tag above.
       patches = [
-#        ./patches/opencode-native-fetch-timeout.patch
+        # Bun's fetch enforces a default five-minute deadline on every request; this wraps
+        # HttpClient so native requests opt out. Bump-dependent: must apply cleanly to src rev.
+        ./patches/opencode-native-fetch-timeout.patch
         # Raise the session retry budget from 10 attempts (~84s) to 65535 by default so
         # transient provider failures (e.g. HTTP 500) keep retrying for days instead of
-        # failing the step. Override at runtime with OPENCODE_RETRY_ATTEMPTS.
-#        ./patches/opencode-retry-attempts.patch
+        # failing the step. Override at runtime with OPENCODE_RETRY_ATTEMPTS. Offset: -35 lines.
+        ./patches/opencode-retry-attempts.patch
         # Web GUI: stop generation on Ctrl+G only. Bare Escape still closes popovers and
-        # cancels queue editing, but no longer aborts a running turn (interaction.ts).
+        # cancels queue editing, but no longer aborts a running turn (interaction.ts). Offset: +4 lines.
         ./patches/opencode-esc-no-interrupt.patch
       ];
 
