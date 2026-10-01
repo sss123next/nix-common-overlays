@@ -114,7 +114,7 @@ self: super: {
       # every native request opts out, like packages/cli/src/run/run.ts does.
       # Bump-dependent: must apply cleanly to the src tag above.
       patches = [
-        ./patches/opencode-native-fetch-timeout.patch
+#        ./patches/opencode-native-fetch-timeout.patch
         # Raise the session retry budget from 10 attempts (~84s) to 65535 by default so
         # transient provider failures (e.g. HTTP 500) keep retrying for days instead of
         # failing the step. Override at runtime with OPENCODE_RETRY_ATTEMPTS.
