@@ -70,11 +70,11 @@ self: super: {
           outputHashMode = "recursive";
           # Calibrated against our nixpkgs bun 1.4.x (the official hashes.json keys to a different
           # bun ABI — opencode issue #49063), so values are pinned from local `got:` output, not
-          # upstream. x86_64-linux re-pinned for the v2.0.20 dep delta; other systems stay
+          # upstream. x86_64-linux re-pinned for the v2 branch HEAD dep delta; other systems stay
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-m8JpVKOPwfOnypJMTuGqa3wiV1ijNudOyPp4koD0tos=";
+            "x86_64-linux"   = "sha256-aV8uT3GVOhHTL0ZQ4dLTOV3XdB1QPNfyFYFC3PF5haw=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -92,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.0.20";
+      version = "2.0.21-pre";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -100,10 +100,10 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        tag = "v${finalAttrs.version}";
+        rev = "033b9ea56070c3e24cc20935165d20148e80d5e7";
         # Recursive hash of the unpacked tree (fetchFromGitHub semantics); the codeload
-        # tarball SRI is sha256-r0SBbfOaOMXQeIbMzVXP+3xh/9330WGVddiACWojTLw=.
-        hash = "sha256-r0SBbfOaOMXQeIbMzVXP+3xh/9330WGVddiACWojTLw=";
+        # tarball SRI is sha256-d1iW+PD2EPQpf7z16Af6JYi20mo4o1gClkHvoL5elw0=.
+        hash = "sha256-d1iW+PD2EPQpf7z16Af6JYi20mo4o1gClkHvoL5elw0=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
