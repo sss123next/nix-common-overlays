@@ -14,7 +14,7 @@ self: super: {
         # main @ 2026-09-30, "fix(core): honor NO_PROXY for usage-statistics RUM uploads (#13023)"
         # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
         rev = "a7deb01bcbd5a5c795bfccbf2bd0b4e445286b92";
-        hash = "";
+        hash = "sha256-0UKAK5Q30GiELscwLMrt+OSV5LiFlD1QzESi4TO4p8o=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -43,8 +43,7 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        # FOD-computed narHash of the materialized node_modules (revealed by a stub-hash build).
-        hash = "";
+        hash = "sha256-DvNuJl3wTUl4aQj4MZhVqtGUsU2TGWoKQmqLjfolP2Y=";
       };
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
