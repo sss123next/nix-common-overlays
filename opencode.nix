@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-H6E2GqcXuaEzJnVpRrbXm4xE0BwjDfJ/2Foswyldcm4=";
+            "x86_64-linux"   = "sha256-rTbqZ3Ly+Oz3uKoP1aIOm1JPs3reMfFfWYTcq7GOSnE=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -100,10 +100,8 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "0f9f0a9ae30ed50d2b66fe09a70ac5a0aae8c378";
-        # Recursive hash of the unpacked tree (fetchFromGitHub semantics); the codeload
-        # tarball SRI is sha256-6yzAubr2Sq5Mpg6NHfC9PVruIuGe8BpZgEFN05sJuuA=.
-        hash = "sha256-6yzAubr2Sq5Mpg6NHfC9PVruIuGe8BpZgEFN05sJuuA=";
+        rev = "f02e184ba4ec2316b2c85adff4d92d2e1fe5f7aa";
+        hash = "sha256-O24BwW6bQrROqnf63BDUJnFxjQdl/YSkxP/nhNGwHBU=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
