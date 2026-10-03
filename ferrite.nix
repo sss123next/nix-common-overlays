@@ -38,7 +38,10 @@ self: super: {
         hash = "sha256-en/m1WPzTElEeDE/WcBi6D6cHOpqZ2ZmgnR15RrD/M4=";
       };
 
-      cargoLock.lockFile = ./ferrite/Cargo.lock;
+      cargoLock.lockFile = fetchurl {
+        url = "https://raw.githubusercontent.com/OlaProeis/Ferrite/master/Cargo.lock";
+        hash = "sha256-N/RMKoKDj2TxZ6733or2pSd7lXS4ZZYSFqsxncaxJlk=";
+      };
 
       nativeBuildInputs = [ pkg-config makeWrapper ]
         ++ lib.optionals stdenv.hostPlatform.isLinux [ wrapGAppsHook3 ];
