@@ -6,15 +6,15 @@ self: super: {
       pname = "qwen-code";
       # No newer release tag yet (package.json on main is still 0.24.6); pinned to
       # the last main commit instead, upstream version embedded by the build is 0.24.6.
-      version = "0.24.6-unstable-2026-09-30";
+      version = "0.24.6-unstable-2026-10-04";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-09-30, "fix(core): honor NO_PROXY for usage-statistics RUM uploads (#13023)"
+        # main @ 2026-10-04, "test(cli): give the unknown Hook fence waitFor an explicit timeout (#13316) (#13323)"
         # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
-        rev = "a7deb01bcbd5a5c795bfccbf2bd0b4e445286b92";
-        hash = "sha256-0UKAK5Q30GiELscwLMrt+OSV5LiFlD1QzESi4TO4p8o=";
+        rev = "9915c7ff8ff17a6c5e0840053a0c05bb72eec510";
+        hash = "sha256-APp4XrDKK24CbyqA0ak8Nh8lt3YZ8Ur2ujOqtlofncU=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -43,7 +43,7 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-DvNuJl3wTUl4aQj4MZhVqtGUsU2TGWoKQmqLjfolP2Y=";
+        hash = "sha256-CZcGdh3LOVGm9adJIJzBoQq8oRfKK37i/v0neb/io6o=";
       };
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
