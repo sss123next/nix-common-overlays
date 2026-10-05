@@ -3,7 +3,7 @@ self: super: {
   mumble-git =
     with super;
     with gsettings-desktop-schemas;
-    (mumble.override{stdenv = gcc14Stdenv;}).overrideAttrs (oldAttrs: rec {
+    mumble.overrideAttrs (oldAttrs: rec {
       version = "git";
       src = fetchGit {
         url = "https://github.com/mumble-voip/mumble";
@@ -35,6 +35,8 @@ self: super: {
         nlohmann_json
       ];
       patches = [ ];
-      #            nativeBuildInputs = oldAttrs.nativeBuildInputs ++ [ python3 pkg-config python3Packages.setuptools];
+      # GCC16 по умолчанию собирает на C23, где `bool` — ключевое слово:
+      # overlay_gl/overlay.c не компилируется (`typedef _Bool bool`). Форсим gnu17 для C.
+      cmakeFlags = (oldAttrs.cmakeFlags or [ ]) ++ [ "-DCMAKE_C_FLAGS=-std=gnu17" ];
     });
 }
