@@ -6,15 +6,15 @@ self: super: {
       pname = "qwen-code";
       # No newer release tag yet (package.json on main is still 0.24.6); pinned to
       # the last main commit instead, upstream version embedded by the build is 0.24.6.
-      version = "0.24.6-unstable-2026-10-04";
+      version = "0.25.0-unstable-2026-10-08";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-04, "test(cli): give the unknown Hook fence waitFor an explicit timeout (#13316) (#13323)"
+        # main @ 2026-10-08, "feat(managed-agent): add reliable ACTIVE Workspace deletion (L3) (#13354)"
         # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
-        rev = "9915c7ff8ff17a6c5e0840053a0c05bb72eec510";
-        hash = "sha256-APp4XrDKK24CbyqA0ak8Nh8lt3YZ8Ur2ujOqtlofncU=";
+        rev = "fe4d4e345c3f52fd6d8455646cdd3c782ca8b227";
+        hash = "sha256-PkI+B4U/nqCDwYns+HRzyDJTmUtdBCBi5oTK88QHsWQ=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
