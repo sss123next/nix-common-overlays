@@ -44,13 +44,19 @@ self: super: {
     in
     buildNpmPackage (finalAttrs: {
       pname = "openhands";
-      version = "1.25.0";
+      # package.json на main всё ещё 1.25.0, но после тега v1.25.0 уже 48 коммитов —
+      # пин по rev с датой (паттерн git-version-packaging).
+      version = "1.25.0-unstable-2026-10-08";
 
       src = fetchFromGitHub {
         owner = "OpenHands";
         repo = "OpenHands";
-        rev = "v${finalAttrs.version}";
-        hash = "sha256-KdYDr16NzKcGxWx1yXdLN487d1/dp1A174DJGAi4rWs=";
+        # main @ 2026-10-08, "fix(telemetry): never initialize PostHog under Do Not Track (#18086)".
+        # package-lock.json и config/defaults.json с v1.25.0 не менялись → npmDepsHash
+        # и патч локерфиля остаются прежними.
+        # tag = "v1.25.0"; hash = "sha256-KdYDr16NzKcGxWx1yXdLN487d1/dp1A174DJGAi4rWs=";
+        rev = "baf1cbef090fce793d3017276c1025c057920a4b";
+        hash = "sha256-KMTetoOUxpWkvGazhyeFxvFcBb3IuLcm9+qjcbR69/4=";
       };
 
       # В upstream package-lock.json 7 записей без `integrity` (у
