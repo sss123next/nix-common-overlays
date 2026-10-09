@@ -1,0 +1,36 @@
+--- a/CMakeLists.txt	1970-01-01 03:00:01.000000000 +0300
++++ b/CMakeLists.txt	2026-10-09 19:14:22.789856362 +0300
+@@ -1177,6 +1177,10 @@
+ endfunction()
+ 
+ function(orcaslicer_copy_sos target config postfix output_sos)
++    if (NOT EXISTS "${CMAKE_PREFIX_PATH}/lib/libavformat.so")
++        set(${output_sos} "" PARENT_SCOPE)
++        return()
++    endif()
+ 
+     get_property(_is_multi GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+     get_target_property(_alt_out_dir ${target} RUNTIME_OUTPUT_DIRECTORY)
+@@ -1358,6 +1362,9 @@
+     ${LIBDIR_BIN}/libswscale.so.8
+     ${LIBDIR_BIN}/libswscale.so.8.1.100
+     )
++    if (NOT EXISTS "${LIBDIR_BIN}/libavformat.so.61")
++        set(LIBRARY_FILES "")
++    endif()
+     install(FILES ${LIBRARY_FILES} DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+ endif ()
+ 
+--- a/src/CMakeLists.txt	1970-01-01 03:00:01.000000000 +0300
++++ /tmp/opencode/orca/src/b/src/CMakeLists.txt	2026-10-09 18:05:02.425091871 +0300
+@@ -400,8 +400,8 @@
+     install(DIRECTORY "${CMAKE_PREFIX_PATH}/libpython/" DESTINATION "python")
+ else ()
+     if (APPLE)
+-    else()
++    elseif (output_sos_${build_type})
+         install(FILES ${output_sos_${build_type}} DESTINATION "${CMAKE_INSTALL_PREFIX}")
+-    endif()
++    endif ()
+     install(TARGETS OrcaSlicer RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR})
+ endif ()
