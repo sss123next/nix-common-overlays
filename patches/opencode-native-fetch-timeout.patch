@@ -8,7 +8,7 @@ index a34f0447dd..a97d0674b0 100644
  import * as NodePath from "@effect/platform-node/NodePath"
 -import { FileSystem, Path } from "effect"
 +import { Effect, FileSystem, Layer, Path } from "effect"
- import { FetchHttpClient, HttpClient } from "effect/unstable/http"
+ import { FetchHttpClient, HttpClient } from "effect/http"
  import { makeGlobalNode } from "./app-node.js"
  
  export const filesystem = makeGlobalNode({ service: FileSystem.FileSystem, layer: NodeFileSystem.layer, deps: [] })
