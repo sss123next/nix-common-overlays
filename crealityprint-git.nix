@@ -1,0 +1,382 @@
+{ inputs }:
+self: super:
+let
+  inherit (super) lib clangStdenv;
+
+  # wx должен совпадать с wxinspector.nix (иначе в одной ссылке два wx).
+  wxGTK' =
+    (super.wxwidgets_3_3.override {
+      withPrivateFonts = true;
+      withWebKit = true;
+      withEGL = true;
+    }).overrideAttrs
+      (old: {
+        buildInputs = old.buildInputs ++ [ super.libsecret ];
+        configureFlags = old.configureFlags ++ [
+          # Disable noisy debug dialogs
+          "--enable-debug=no"
+          "--enable-secretstore"
+        ];
+      });
+
+  boost' = super.boost186.override {
+    enableShared = true;
+    enableStatic = false;
+    extraFeatures = [
+      "log"
+      "thread"
+      "filesystem"
+    ];
+  };
+
+  withSystemd = clangStdenv.hostPlatform.isLinux;
+  withNvidiaGLWorkaround = false;
+
+  # Alibaba Cloud OSS SDK — загрузка файлов в облако Creality.
+  # Версия и патч — из deps/ CrealityPrint (v1.9.2); в nixpkgs пакета нет.
+  aliyunOssSdk = super.stdenv.mkDerivation (finalAttrs: {
+    pname = "aliyun-oss-cpp-sdk";
+    version = "1.9.2";
+
+    src = super.fetchFromGitHub {
+      owner = "aliyun";
+      repo = "aliyun-oss-cpp-sdk";
+      rev = "1.9.2";
+      hash = "sha256-XOtOtU4H4oIgNEUBbC06VGpLEuzmPaeRRpCRIUuBL6g=";
+    };
+
+    patches = [ ./crealityprint-git/aliyun-oss-1.9.2-fix-slicer-build.patch ];
+
+    # HttpClient.cc в CRLF — патч (git apply у Creality это игнорировал)
+    prePatch = ''
+      sed -i 's/\r$//' sdk/src/http/HttpClient.cc
+    '';
+
+    postPatch = ''
+      # cmake 4.x отвергает cmake_minimum_required < 3.5
+      sed -i 's/cmake_minimum_required(VERSION 3.1)/cmake_minimum_required(VERSION 3.10)/' CMakeLists.txt
+      # свежие компиляторы + -Werror = фейл сборки
+      sed -i 's/-Werror//g' CMakeLists.txt
+    '';
+
+    nativeBuildInputs = [ super.cmake ];
+    buildInputs = [
+      super.curl
+      super.openssl
+    ];
+
+    cmakeFlags = [
+      (lib.cmakeBool "BUILD_SAMPLE" false)
+      (lib.cmakeBool "BUILD_TESTS" false)
+      # static: find_library в CrealityPrint найдёт .a, без visibility-проблем
+      (lib.cmakeBool "BUILD_SHARED_LIBS" false)
+      (lib.cmakeFeature "CMAKE_INSTALL_LIBDIR" "lib")
+    ];
+
+    meta = {
+      description = "Alibaba Cloud Object Storage Service C++ SDK";
+      homepage = "https://github.com/aliyun/aliyun-oss-cpp-sdk";
+      license = lib.licenses.asl20;
+      platforms = lib.platforms.linux;
+    };
+  });
+in
+{
+  crealityprint-git = clangStdenv.mkDerivation (finalAttrs: {
+    pname = "crealityprint-git";
+    version = "7.0.0-unstable-2026-10-10";
+
+    src = super.fetchFromGitHub {
+      owner = "CrealityOfficial";
+      repo = "CrealityPrint";
+      rev = "59ae8cbb0437dcc7236e27433ecd4aeb52be0244";
+      hash = "sha256-JqclLOgjnku5zDXuKFOUhPyz1li3Zd6xSQm5UcfJy6I=";
+      fetchSubmodules = false;
+    };
+
+    __structuredAttrs = true;
+    strictDeps = true;
+
+    nativeBuildInputs = [
+      super.cmake
+      super.pkg-config
+      super.wrapGAppsHook3
+      wxGTK'
+    ];
+
+    buildInputs = [
+      super.binutils
+      boost'
+      boost'.dev
+      super.assimp
+      super.cereal
+      # CrealityPrint написан под CGAL 5.4 (пин в deps/CGAL/CGAL.cmake),
+      # CGAL 6.x сломал property_map()/AABB_traits/extract_boundary_cycles
+      super.cgal_5
+      super.curl
+      super.dbus
+      super.draco
+      super.eigen
+      super.expat
+      super.ffmpeg
+      super.glew
+      super.glfw
+      super.glib
+      super.glib-networking
+      super.gmp
+      super.gst_all_1.gstreamer
+      super.gst_all_1.gst-plugins-base
+      super.gst_all_1.gst-plugins-bad
+      (super.gst_all_1.gst-plugins-good.override { gtkSupport = true; })
+      super.gtk3
+      super.hicolor-icon-theme
+      super.libpng
+      super.libsecret
+      super.usrsctp
+      super.mpfr
+      super.nlopt
+      # OCCT — CAD-ядро для STEP/3D-геометрии (v7.9: модули TKDE* вместо
+      # старых TKSTEP*/TKXDESTEP — см. sed в postPatch)
+      super.opencascade-occt
+      super.openvdb
+      super.onetbb
+      super.paho-mqtt-cpp
+      super.paho-mqtt-c
+      super.python312
+      super.webkitgtk_4_1
+      wxGTK'
+      super.libx11
+      super.opencv.cxxdev
+      super.libnoise
+      super.x264 # webrtc_video линкует -lx264 (ffmpeg encoder)
+      aliyunOssSdk
+    ]
+    ++ lib.optionals withSystemd [ super.systemdLibs ];
+
+    patches = [
+      # OpenVDB: убираем поиск IlmBase (в nixpkgs он часть OpenEXR/Imath)
+      ./orca-slicer-git/no-ilmbase.patch
+      # Закрытые Creality-библиотеки (CR_TPMS, CR_KM_RECIPE, CR_FILLTENSOR):
+      # заменяем FATAL_ERROR на STATUS, убираем ARM64-проверки
+      ./crealityprint-git/closed-source-optional.patch
+      ./crealityprint-git/closed-source-optional-2.patch
+      # (PahoMqttCpp: nixpkgs собирает shared, а не static — чиним в postPatch)
+    ];
+
+    postPatch = ''
+      # Отключаем WebRTC видео (Yang-зависимости нет в nixpkgs)
+      sed -i 's/set(ENABLE_WEBRTC_VIDEO ON)/set(ENABLE_WEBRTC_VIDEO OFF)/' src/CMakeLists.txt
+
+      # Подкладываем stub-заголовки для закрытых библиотек в include path
+      mkdir -p _stub_include
+      cp ${./crealityprint-git/cr_tpms_library.h} _stub_include/cr_tpms_library.h
+      cp ${./crealityprint-git/cr_km_recipe.h} _stub_include/cr_km_recipe.h
+      cp ${./crealityprint-git/cr_FillTensor_library.h} _stub_include/cr_FillTensor_library.h
+      # Глобальный include для всех таргетов под src/ (NIX_CFLAGS_COMPILE
+      # не экспандит $PWD, поэтому через CMake)
+      sed -i '1a include_directories(''${CMAKE_SOURCE_DIR}/_stub_include)' src/CMakeLists.txt
+
+      # set(OpenCASCADE_DIR ''${CMAKE_PREFIX_PATH}/lib/cmake/occt) указывает на
+      # deps-супербилд, а в nixpkgs конфиг OCCT лежит в lib/cmake/opencascade.
+      # Пусть find_package ищет сам (через NIXPKGS_CMAKE_PREFIX_PATH).
+      sed -i '/set(OpenCASCADE_DIR/d' src/libslic3r/CMakeLists.txt
+
+      # nixpkgs OpenCV не собирает opencv_world и не экспортирует opencv::opencv
+      # — оба if(TARGET) не срабатывают. Линкуем конкретные модули (как в
+      # orca-slicer-git: dont-link-opencv-world.patch).
+      substituteInPlace src/libslic3r/CMakeLists.txt \
+        --replace-fail \
+          'if(TARGET opencv_world)
+    target_link_libraries(libslic3r opencv_world)
+endif()' \
+          'target_link_libraries(libslic3r opencv_core opencv_imgproc opencv_imgcodecs)'
+
+      # OCCT 7.8+: TKSTEP/TKSTEP209/TKSTEPAttr/TKSTEPBase/TKXDESTEP → TKDESTEP
+      sed -i \
+        -e 's|^    TKXDESTEP$|    TKDESTEP|' \
+        -e 's|^    TKSTEP$|    TKDESTEP|' \
+        -e '/^    TKSTEP209$/d' \
+        -e '/^    TKSTEPAttr$/d' \
+        -e '/^    TKSTEPBase$/d' \
+        src/libslic3r/CMakeLists.txt
+
+      # nixpkgs libnoise ставит заголовки как include/noise/..., а не
+      # include/libnoise/...
+      sed -i \
+        's|<libnoise/noise.h>|<noise/noise.h>|; s|"libnoise/noise.h"|"noise/noise.h"|' \
+        src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp
+
+      # boost::filesystem::change_extension не существует (только в комментарии
+      # path.hpp) — используем метод path::replace_extension
+      substituteInPlace src/libslic3r/PrintBase.cpp \
+        --replace-fail \
+          'filename = boost::filesystem::change_extension(filename, default_ext);' \
+          'filename.replace_extension(default_ext);'
+
+      # Оборачиваем линковку NOTFOUND-переменных в if()
+      # CP_TPMS_Gradual: target_link_libraries(''${PROJECT_DLL} ''${CP_TPMS_Gradual})
+      sed -i '/^find_library(CP_TPMS_Gradual cr_tpms_library)$/,/^endif()$/{
+        /^    target_link_libraries(/{
+          s/^    target_link_libraries(/      if(CP_TPMS_Gradual)\n&/
+        }
+      }' src/CMakeLists.txt
+      # Добавляем endif() после endif() блока CR_TPMS
+      sed -i '/^find_library(CP_TPMS_Gradual cr_tpms_library)$/,/^endif()$/{
+        /^endif()$/{ s/^endif()$/endif()\n      endif()/ }
+      }' src/CMakeLists.txt
+
+      # CR_FILLTENSOR: target_link_libraries(libslic3r ''${CP_FILLTENSOR_Gradual})
+      sed -i '/^find_library(CP_FILLTENSOR_Gradual cr_FillTensor_library)$/,/^endif()$/{
+        /^    target_link_libraries(/{
+          s/^    target_link_libraries(/      if(CP_FILLTENSOR_Gradual)\n&/
+        }
+      }' src/CMakeLists.txt
+      # Добавляем закрывающий endif() для вложенного if(CP_FILLTENSOR_Gradual)
+      sed -i '/^find_library(CP_FILLTENSOR_Gradual cr_FillTensor_library)$/,/^endif()$/{
+        /^endif()$/{ s/^endif()$/endif()\n      endif()/ }
+      }' src/CMakeLists.txt
+      # Комментируем безусловные target_link_libraries с NOTFOUND-переменными
+      # (они будут линковаться только если библиотека найдена).
+      substituteInPlace src/CMakeLists.txt \
+        --replace-fail \
+          '    target_link_libraries(''${PROJECT_DLL} ''${CP_TPMS_Gradual})' \
+          '#    target_link_libraries(''${PROJECT_DLL} ''${CP_TPMS_Gradual})' \
+        --replace-fail \
+          'target_link_libraries(data_directory_migrate PRIVATE ''${CP_TPMS_Gradual}' \
+          '#target_link_libraries(data_directory_migrate PRIVATE ''${CP_TPMS_Gradual}' \
+        --replace-fail \
+          '    target_link_libraries(libslic3r ''${CP_FILLTENSOR_Gradual})' \
+          '#    target_link_libraries(libslic3r ''${CP_FILLTENSOR_Gradual})'
+
+      # PahoMqttCpp: nixpkgs собирает shared, а не static
+      substituteInPlace src/CMakeLists.txt \
+        --replace-fail \
+          'PahoMqttCpp::paho-mqttpp3-static' \
+          'PahoMqttCpp::paho-mqttpp3'
+
+      # WebRTC/Yang-видео отключено (ENABLE_WEBRTC_VIDEO=OFF) — подменяем
+      # заголовок на API-совместимую заглушку (GUI вызывает WebRTCDecoder
+      # в Linux-ветках безусловно)
+      cp ${./crealityprint-git/webrtc_stub_WebRTCDecoder.h} src/video/WebRTCDecoder.h
+
+      # --- legacy boost::filesystem API (удалён в boost >= 1.86) ---
+      sed -i \
+        's|#include <boost/filesystem/convenience.hpp>|#include <boost/filesystem.hpp>|; s|boost::filesystem::basename(boost::filesystem::path(path))|boost::filesystem::path(path).stem().string()|' \
+        src/slic3r/GUI/RemovableDriveManager.cpp
+      sed -i 's|boost::filesystem::extension(path)|path.extension().string()|' \
+        src/slic3r/GUI/Plater.cpp
+      sed -i 's|fs::extension(file_path)|fs::path(file_path).extension().string()|' \
+        src/slic3r/GUI/HttpServer.cpp
+      find src -name '*.cpp' -o -name '*.hpp' | xargs sed -i \
+        's|copy_option::overwrite_if_exists|copy_options::overwrite_existing|g'
+
+      # boost::uuids::detail::sha1: в boost >= 1.86 digest_type = unsigned char[20]
+      # (был uint32_t[5]); восстанавливаем big-endian слова для hex-вывода
+      substituteInPlace src/slic3r/GUI/GUI_App.cpp \
+        --replace-fail \
+          '    unsigned int digest[5] = { 0 };' \
+          '    boost::uuids::detail::sha1::digest_type digest = {};' \
+        --replace-fail \
+          '        oss << digest[i];' \
+          '        oss << static_cast<unsigned int>((uint32_t(digest[i * 4]) << 24) | (uint32_t(digest[i * 4 + 1]) << 16) | (uint32_t(digest[i * 4 + 2]) << 8) | uint32_t(digest[i * 4 + 3]));'
+    '';
+
+    cmakeFlags = [
+      (lib.cmakeBool "SLIC3R_STATIC" false)
+      (lib.cmakeBool "SLIC3R_FHS" true)
+      (lib.cmakeFeature "SLIC3R_GTK" "3")
+      (lib.cmakeBool "BUILD_TESTS" false)
+      # breakpad: краш-дампы Creality — не нужны, библиотеки в nixpkgs нет
+      # (использование в коде полностью под #ifdef USE_BREAKPAD)
+      (lib.cmakeBool "ENABLE_BREAKPAD" false)
+      (lib.cmakeBool "ORCA_TOOLS" false)
+      (lib.cmakeBool "GENERATE_ORCA_HEADER" false)
+      (lib.cmakeBool "SLIC3R_PERL_XS" false)
+      (lib.cmakeFeature "CMAKE_CXX_FLAGS" "-DGL_SILENCE_DEPRECATION")
+      (lib.cmakeFeature "CMAKE_EXE_LINKER_FLAGS" "-Wl,--no-as-needed")
+      (lib.cmakeFeature "LIBNOISE_INCLUDE_DIR" "${super.libnoise}/include")
+      (lib.cmakeFeature "LIBNOISE_LIBRARY_RELEASE" "${super.libnoise}/lib/libnoise-static.a")
+      # Paho MQTT: указываем где лежат конфиги eclipse-paho-mqtt-c
+      (lib.cmakeFeature "eclipse-paho-mqtt-c_DIR" "${super.paho-mqtt-c}/lib/cmake/eclipse-paho-mqtt-c")
+      "-Wno-dev"
+    ];
+
+    env = {
+      # Не ставим NLOPT — cmake/modules/FindNLopt.cmake при незаданной
+      # переменной ищет nlopt (без суффикса _cxx) через find_library.
+      # NLOPT = super.nlopt;
+
+      NIX_CFLAGS_COMPILE = toString [
+        "-Wno-ignored-attributes"
+        "-I${super.opencv.out}/include/opencv4"
+        "-I${super.libnoise}/include"
+        "-Wno-error=incompatible-pointer-types"
+        "-Wno-error=format-security"
+        "-Wno-uninitialized"
+        "-Wno-unused-result"
+        "-Wno-deprecated-declarations"
+        "-Wno-format-overflow"
+        # libboost_log.so экспортирует неймспейс v2_mt_posix (с BOOST_LOG_DLL),
+        # а без этого флага часть таргетов (libslic3r_cgal — нет boost_headeronly
+        # в link libs) компилируется в статическом неймспейсе v2s_mt_posix →
+        # undefined refs при линковке. Глобально задаём dyn-link.
+        "-DBOOST_ALL_DYN_LINK"
+        "-DBOOST_ALLOW_DEPRECATED_HEADERS"
+        "-DBOOST_MATH_DISABLE_STD_FPCLASSIFY"
+        "-DBOOST_MATH_NO_LONG_DOUBLE_MATH_FUNCTIONS"
+        "-DBOOST_MATH_DISABLE_FLOAT128"
+        "-DBOOST_MATH_NO_QUAD_SUPPORT"
+        "-DBOOST_MATH_MAX_FLOAT128_DIGITS=0"
+        "-DBOOST_CSTDFLOAT_NO_LIBQUADMATH_SUPPORT"
+        "-DBOOST_MATH_DISABLE_FLOAT128_BUILTIN_FPCLASSIFY"
+      ];
+
+      NIX_LDFLAGS = toString [
+        (lib.optionalString withSystemd "-ludev")
+        "-L${boost'}/lib"
+        "-lboost_log"
+        "-lboost_log_setup"
+        # CrealityPrint.cpp вызывает XInitThreads, но таргет не линкует X11 явно
+        "-lX11"
+        # WebView.cpp использует webkit API напрямую
+        "-lwebkit2gtk-4.1"
+      ];
+    };
+
+    # Generate translation files (скрипта run_gettext.sh в CrealityPrint нет)
+
+    preFixup = ''
+      gappsWrapperArgs+=(
+        --prefix LD_LIBRARY_PATH : "$out/lib:${
+          lib.makeLibraryPath [
+            super.glew
+          ]
+        }"
+        --set WEBKIT_DISABLE_COMPOSITING_MODE 1
+        ${lib.optionalString withNvidiaGLWorkaround ''
+          --set __GLX_VENDOR_LIBRARY_NAME mesa
+          --set __EGL_VENDOR_LIBRARY_FILENAMES /run/opengl-driver/share/glvnd/egl_vendor.d/50_mesa.json
+          --set MESA_LOADER_DRIVER_OVERRIDE zink
+          --set GALLIUM_DRIVER zink
+          --set WEBKIT_DISABLE_DMABUF_RENDERER 1
+        ''}
+      )
+    '';
+
+    postInstall = ''
+      rm -f $out/LICENSE.txt
+    '';
+
+    separateDebugInfo = true;
+
+    meta = {
+      description = "G-code generator for 3D printers (Creality), git master build";
+      homepage = "https://github.com/CrealityOfficial/CrealityPrint";
+      changelog = "https://github.com/CrealityOfficial/CrealityPrint/commits/master/";
+      license = lib.licenses.agpl3Only;
+      maintainers = with lib.maintainers; [ ];
+      mainProgram = "CrealityPrint";
+      platforms = lib.platforms.linux;
+    };
+  });
+}
