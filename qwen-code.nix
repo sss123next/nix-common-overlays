@@ -6,15 +6,15 @@ self: super: {
       pname = "qwen-code";
       # No newer release tag yet (package.json on main is still 0.24.6); pinned to
       # the last main commit instead, upstream version embedded by the build is 0.24.6.
-      version = "0.25.0-unstable-2026-10-08";
+      version = "0.25.1-unstable-2026-10-11";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-08, "feat(managed-agent): add reliable ACTIVE Workspace deletion (L3) (#13354)"
+        # main @ 2026-10-11, "fix(managed-agent): return 404 for unknown tool publications (#13602)"
         # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
-        rev = "fe4d4e345c3f52fd6d8455646cdd3c782ca8b227";
-        hash = "sha256-PkI+B4U/nqCDwYns+HRzyDJTmUtdBCBi5oTK88QHsWQ=";
+        rev = "01d3e6d81a6a6ae14e218f0d7f7b35e2d8f3cf58";
+        hash = "sha256-BSjIL5EVk8ismu2wuEDLsiBSyIpPRG8/eirvfGktpSw=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
