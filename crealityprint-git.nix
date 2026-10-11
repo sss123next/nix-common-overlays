@@ -80,8 +80,71 @@ let
       platforms = lib.platforms.linux;
     };
   });
+
+  # MetaRTC — WebRTC-стек Creality (v1.0.0), нужен для LAN-камеры K1/K2
+  # (http://<ip>:8000/call/webrtc_local). Собирается только под Linux.
+  # Статические библиотеки libmetartc6.a / libmetartccore6.a + заголовки
+  # include/metartc/*. Патчи: FFmpeg 7 const-API (avcodec_find_decoder →
+  # const AVCodec*) и avcodec_close() (удалён в FFmpeg 7, маппится на no-op
+  # через ffcompat.h — контекст caller всё равно сам освобождает).
+  metartc = super.stdenv.mkDerivation (finalAttrs: {
+    pname = "metartc";
+    version = "1.0.0";
+
+    src = super.fetchzip {
+      url = "https://github.com/CrealityOfficial/metartc/archive/refs/tags/v1.0.0.tar.gz";
+      hash = "sha256-WMz3xj0dagf51qColVTRRWmUnq4j3NZw6gVcIvZBDaM=";
+    };
+
+    patches = [ ./crealityprint-git/metartc/ffmpeg7-const-and-avcodec-close.patch ];
+
+    nativeBuildInputs = [
+      super.cmake
+      super.pkg-config
+      super.ninja
+    ];
+
+    buildInputs = [
+      super.openssl
+      super.ffmpeg
+      super.alsa-lib # YangAudioPlayLinux/AecLinux (libmetartc6) тянут asound
+    ];
+
+    cmakeFlags = [
+      (lib.cmakeFeature "CMAKE_BUILD_TYPE" "Release")
+      # cmake 4.x отвергает cmake_minimum_required < 3.5 (в metartc стоит 2.8)
+      (lib.cmakeFeature "CMAKE_POLICY_VERSION_MINIMUM" "3.5")
+      # Модуль FindFFmpeg (nixpkgs ffmpeg не шиппит CMake-конфиг, только
+      # pkg-config) лежит в этом же store-каталоге.
+      (lib.cmakeFeature "CMAKE_MODULE_PATH" "${./crealityprint-git/metartc}")
+    ];
+
+    env = {
+      # Форс-include ffcompat.h (avcodec_close → no-op; avcodec_find_decoder
+      # вернул const AVCodec* — const сами починили патчем). + приглушаем шум
+      # legacy-C (GCC 14 сделал incompatible-pointer-types ошибкой по умолч.).
+      NIX_CFLAGS_COMPILE = toString [
+        "-include ${./crealityprint-git/metartc}/ffcompat.h"
+        "-w"
+        "-Wno-incompatible-pointer-types"
+        "-Wno-implicit-function-declaration"
+        "-Wno-int-conversion"
+      ];
+    };
+
+    meta = {
+      description = "MetaRTC WebRTC stack (Creality fork) for LAN camera streaming";
+      homepage = "https://github.com/CrealityOfficial/metartc";
+      license = lib.licenses.mit;
+      platforms = lib.platforms.linux;
+    };
+  });
 in
 {
+  # MetaRTC экспонируем отдельно — чтобы собирать/тестировать независимо
+  # (crealityprint-git тянет его как buildInput).
+  metartc = metartc;
+
   crealityprint-git = clangStdenv.mkDerivation (finalAttrs: {
     pname = "crealityprint-git";
     version = "7.0.0-unstable-2026-10-10";
@@ -150,6 +213,14 @@ in
       super.libnoise
       super.x264 # webrtc_video линкует -lx264 (ffmpeg encoder)
       aliyunOssSdk
+      # --- WebRTC-видео (MetaRTC): линковка webrtc_video (src/video) ---
+      metartc
+      super.srtp # -lsrtp2
+      super.alsa-lib # -lasound
+      super.opus # -lopus
+      super.speexdsp # -lspeexdsp
+      super.xz # -llzma
+      super.libjpeg # WebRTCDecoder.cpp: jpeglib.h (rgb_to_jpeg)
     ]
     ++ lib.optionals withSystemd [ super.systemdLibs ];
 
@@ -164,8 +235,9 @@ in
     ];
 
     postPatch = ''
-      # Отключаем WebRTC видео (Yang-зависимости нет в nixpkgs)
-      sed -i 's/set(ENABLE_WEBRTC_VIDEO ON)/set(ENABLE_WEBRTC_VIDEO OFF)/' src/CMakeLists.txt
+      # WebRTC-видео включено (ENABLE_WEBRTC_VIDEO=ON для Linux в src/CMakeLists).
+      # MetaRTC упакован (см. metartc в let-блоке) — заголовки пробрасываем
+      # через NIX_CFLAGS_COMPILE (-I${metartc}/include/metartc).
 
       # Подкладываем stub-заголовки для закрытых библиотек в include path
       mkdir -p _stub_include
@@ -254,10 +326,9 @@ endif()' \
           'PahoMqttCpp::paho-mqttpp3-static' \
           'PahoMqttCpp::paho-mqttpp3'
 
-      # WebRTC/Yang-видео отключено (ENABLE_WEBRTC_VIDEO=OFF) — подменяем
-      # заголовок на API-совместимую заглушку (GUI вызывает WebRTCDecoder
-      # в Linux-ветках безусловно)
-      cp ${./crealityprint-git/webrtc_stub_WebRTCDecoder.h} src/video/WebRTCDecoder.h
+      # WebRTC/Yang-видео включено: используем настоящий src/video/WebRTCDecoder.h
+      # (над MetaRTC, см. metartc в let-блоке). Заголовки metartc/ и jpeglib
+      # пробрасываются через NIX_CFLAGS_COMPILE.
 
       # --- legacy boost::filesystem API (удалён в boost >= 1.86) ---
       sed -i \
@@ -310,6 +381,11 @@ endif()' \
         "-Wno-ignored-attributes"
         "-I${super.opencv.out}/include/opencv4"
         "-I${super.libnoise}/include"
+        # MetaRTC: заголовки лежат в include/metartc/, а исходники включают их
+        # как "yangplayer/...", "yangutil/..." — нужен именно этот каталог.
+        "-I${metartc}/include/metartc"
+        # gcc-14 сделал incompatible-pointer-types ошибкой; в GUI-коде
+        # (boost/cairo) встречаются несовпадения указателей — глобально в warn.
         "-Wno-error=incompatible-pointer-types"
         "-Wno-error=format-security"
         "-Wno-uninitialized"
@@ -365,6 +441,14 @@ endif()' \
 
     postInstall = ''
       rm -f $out/LICENSE.txt
+      # src/CMakeLists.txt жёстко ставит RUNTIME DESTINATION "./" (ветка
+      # не-WIN32), поэтому бинарник оказывается в $out/CrealityPrint. Переносим
+      # в стандартный $out/bin (SLIC3R_FHS кладёт ресурсы в $out/share по
+      # абсолютному пути, так что положение бинарника не критично).
+      if [ -e "$out/CrealityPrint" ]; then
+        mkdir -p "$out/bin"
+        mv "$out/CrealityPrint" "$out/bin/CrealityPrint"
+      fi
     '';
 
     separateDebugInfo = true;

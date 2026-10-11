@@ -1,0 +1,31 @@
+--- a/libmetartc6/src/yangdecoder/pc/YangVideoDecoderFfmpeg.cpp	2025-04-14 05:40:33.000000000 +0300
++++ b/libmetartc6/src/yangdecoder/pc/YangVideoDecoderFfmpeg.cpp	2026-10-11 02:51:03.389980463 +0300
+@@ -176,7 +176,7 @@
+ YangVideoHwType YangVideoDecoderFfmpeg::g_hwType=YangV_Hw_Intel;
+ void  YangVideoDecoderFfmpeg::parseHeaderH265(uint8_t *p,int32_t pLen,int32_t *pwid,int32_t *phei,int32_t *pfps){
+ 
+-	AVCodec *t_codec = yang_avcodec_find_decoder(AV_CODEC_ID_H265);
++	const AVCodec *t_codec = yang_avcodec_find_decoder(AV_CODEC_ID_H265);
+ 	AVCodecContext*	t_codecCtx = yang_avcodec_alloc_context3(t_codec);
+ 	t_codecCtx->extradata = (uint8_t*) yang_av_malloc(pLen + AV_INPUT_BUFFER_PADDING_SIZE);
+ 	t_codecCtx->extradata_size = pLen;
+@@ -199,7 +199,7 @@
+ }
+ void  YangVideoDecoderFfmpeg::parseHeaderH264(uint8_t *p,int32_t pLen,int32_t *pwid,int32_t *phei,int32_t *pfps){
+ 
+-	AVCodec *t_codec = yang_avcodec_find_decoder(AV_CODEC_ID_H264);
++	const AVCodec *t_codec = yang_avcodec_find_decoder(AV_CODEC_ID_H264);
+ 	AVCodecContext*	t_codecCtx = yang_avcodec_alloc_context3(t_codec);
+ 	t_codecCtx->extradata = (uint8_t*) yang_av_malloc(pLen + AV_INPUT_BUFFER_PADDING_SIZE);
+ 	t_codecCtx->extradata_size = pLen;
+--- a/libmetartc6/src/yangdecoder/pc/YangVideoDecoderFfmpeg.h	2025-04-14 05:40:33.000000000 +0300
++++ b/libmetartc6/src/yangdecoder/pc/YangVideoDecoderFfmpeg.h	2026-10-11 02:51:03.388080400 +0300
+@@ -37,7 +37,7 @@
+ 	YangVideoInfo *m_context;
+ 	int32_t m_bitDepth;
+ 	int32_t ret;
+-	AVCodec *m_codec;
++	const AVCodec *m_codec;
+ 	AVCodecContext *m_codecCtx = NULL;
+ 	AVPacket packet;
+ 	AVFrame *m_frame;
