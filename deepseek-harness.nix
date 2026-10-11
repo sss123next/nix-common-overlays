@@ -41,17 +41,18 @@ self: super: {
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "deepseek-harness";
       # No stable tags exist yet (all releases are alpha/rc); pinned to the last
-      # master commit instead, upstream version embedded by the build is 0.2.1-alpha.1.
-      version = "0.2.1-alpha.1-unstable-2026-10-03";
+      # master commit instead, upstream version embedded by the build is 0.2.1-alpha.2.
+      version = "0.2.1-alpha.2-unstable-2026-10-09";
 
       src = fetchFromGitHub {
         owner = "deepseek-ai";
         repo = "deepseek-harness";
-        rev = "5badb15009ae1756c3afe0ae0cef1faafc290ccc";
-        hash = "sha256-/mScgSeh7/1HdIeWGAnxkzlXTjZsxscpnWkwnhR8hsU=";
+        rev = "d743267388641bc76f17c45ce8b4c231aed1d32c";
+        hash = "sha256-MxxwtEPBG8SK6Rw5CqGalnJ5FWAygzVxklCQab5mpbU=";
       };
 
-      # packageManager: pnpm@11.7.0; pnpm >= 11 needs fetcher version 4.
+      # packageManager: pnpm@11.28.5 (nixpkgs pnpm_11 lags a bit; tolerated);
+      # pnpm >= 11 needs fetcher version 4.
       pnpm = pnpm_11;
 
       nativeBuildInputs = [
@@ -90,14 +91,14 @@ self: super: {
         fetcherVersion = 4;
         # FOD hash of the materialized store; pinned from the stub-hash build's
         # `got:` output.
-        hash = "sha256-/RvayNtK+6hJXOiRO17JZQS7lGFnPaQJQkD/Z8bUIHQ=";
+        hash = "sha256-xj6Pw00JIpLHjRS7NROKTNY+GdExEKvHRyjJOwmyNXU=";
       };
 
       env.NODE_OPTIONS = "--max-old-space-size=4096";
       # fetchFromGitHub provides no .git; client-build-environment.ts reads this
       # public value instead of spawning `git rev-parse HEAD`, and its dirty
       # probe treats a missing git as "no metadata" (no dirty marker).
-      env.DSH_CLIENT_COMMIT_HASH = "5badb15009ae1756c3afe0ae0cef1faafc290ccc";
+      env.DSH_CLIENT_COMMIT_HASH = "d743267388641bc76f17c45ce8b4c231aed1d32c";
 
       # `pnpm run build` (scripts/build.ts) = build:native-system (flock Node-API
       # addon; needs the node headers next to process.execPath) + build:lib (tsc
@@ -170,7 +171,7 @@ self: super: {
         runHook postInstall
       '';
 
-      # The CLI reports the upstream package.json version (0.2.1-alpha.1), not the
+      # The CLI reports the upstream package.json version (0.2.1-alpha.2), not the
       # nix -unstable- suffix, so no versionCheckHook; check the entry point and
       # the version prefix manually instead.
       doInstallCheck = true;
@@ -180,7 +181,7 @@ self: super: {
         v=$($out/bin/dsh --version)
         echo "dsh --version => $v"
         case "$v" in
-          0.2.1-alpha.1*) ;;
+          0.2.1-alpha.2*) ;;
           *) echo "ERROR: unexpected dsh version: $v" >&2; exit 1 ;;
         esac
         $out/bin/dsh --help > /dev/null
