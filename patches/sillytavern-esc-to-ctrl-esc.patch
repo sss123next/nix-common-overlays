@@ -1,4 +1,4 @@
-From 4027669b16dc9c8eb0e877a1e8ebe1d8ecdb317c Mon Sep 17 00:00:00 2001
+From f1e2175f90bbe11be45767c03d78ff306e1637cf Mon Sep 17 00:00:00 2001
 From: sss <sss@dark-alexandr.net>
 Date: Wed, 22 Jul 2026 16:48:14 +0300
 Subject: [PATCH 1/2] use ctrl+sec instead of esc to stop generation
@@ -38,7 +38,7 @@ index 569ca5a92..08be0d0ff 100644
 2.55.0
 
 
-From 9380102ed47a1b1e6c6a8d5371f4cdc7fc016dc0 Mon Sep 17 00:00:00 2001
+From 093c70521eeede4669390c9ce66163b4dd7a420e Mon Sep 17 00:00:00 2001
 From: sss <sss@dark-alexandr.net>
 Date: Thu, 24 Sep 2026 00:23:02 +0300
 Subject: [PATCH 2/2] Remap generation stop from Escape to Ctrl+Escape

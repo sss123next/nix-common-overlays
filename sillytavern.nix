@@ -2,10 +2,11 @@
 self: super: {
   sillytavern = with super;
     let
-      version = "2026-09-29";
+      version = "2026-10-03";
       src = fetchGit {
         url = "https://github.com/SillyTavern/SillyTavern";
         ref = "staging";
+        rev = "ad29cbda62e92f145e44d7a10398a38af22ca986";
       };
     in
     buildNpmPackage (finalAttrs: {
