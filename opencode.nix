@@ -70,11 +70,11 @@ self: super: {
           outputHashMode = "recursive";
           # Calibrated against our nixpkgs bun 1.4.x (the official hashes.json keys to a different
           # bun ABI — opencode issue #49063), so values are pinned from local `got:` output, not
-          # upstream. x86_64-linux re-pinned for the v2 HEAD dep delta; other systems stay
+          # upstream. x86_64-linux re-pinned for the v2.0.28 tag dep delta; other systems stay
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-TKJ7jAsppKNrQr6LJFjdxAOkD+bTo4SVAH/e1Z6Vlks=";
+            "x86_64-linux"   = "sha256-A2phM2NMnLdT4+mmM0qzJG2fUN7WcZpLEtIlYrGV7M8=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -92,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.0.26-pre";
+      version = "2.0.28-pre";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -100,8 +100,8 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "4617210822bdbb31e5749751afbfb4584ccedac8";
-        hash = "sha256-CIZdrUVk/W5cUYU86Q71XMYIV3Y9+XEZn5eWw3UlNIo=";
+        rev = "026b106bc5d41b679ffc413264229c340871e4d3";
+        hash = "sha256-7bpaROwB9JYucjqOKh92oWi2iuYmo7pXyUxYKgj4OkI=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
