@@ -1,5 +1,5 @@
 diff --git a/packages/util/src/effect/app-node-platform.ts b/packages/util/src/effect/app-node-platform.ts
-index a34f0447dd..a97d0674b0 100644
+index ee9e462..e7f779a 100644
 --- a/packages/util/src/effect/app-node-platform.ts
 +++ b/packages/util/src/effect/app-node-platform.ts
 @@ -2,12 +2,28 @@

@@ -1,6 +1,8 @@
+diff --git a/packages/app/src/composer/editor/interaction.ts b/packages/app/src/composer/editor/interaction.ts
+index bde7d86..7b03146 100644
 --- a/packages/app/src/composer/editor/interaction.ts
 +++ b/packages/app/src/composer/editor/interaction.ts
-@@ -272,10 +272,14 @@
+@@ -272,10 +272,14 @@ export function createComposerEditor(input: {
        return true
      }
  

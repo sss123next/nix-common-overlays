@@ -1,7 +1,8 @@
 diff --git a/packages/core/src/session/runner/retry.ts b/packages/core/src/session/runner/retry.ts
+index 3032016..35c6f4f 100644
 --- a/packages/core/src/session/runner/retry.ts
 +++ b/packages/core/src/session/runner/retry.ts
-@@ -74,12 +74,15 @@
+@@ -39,12 +39,15 @@ const retryAfter = (input: Input) => {
    return undefined
  }
  
