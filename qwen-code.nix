@@ -6,15 +6,15 @@ self: super: {
       pname = "qwen-code";
       # No newer release tag yet (package.json on main is still 0.24.6); pinned to
       # the last main commit instead, upstream version embedded by the build is 0.24.6.
-      version = "0.25.1-unstable-2026-10-11";
+      version = "0.25.1-unstable-2026-10-13";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-11, "fix(managed-agent): return 404 for unknown tool publications (#13602)"
+        # main @ 2026-10-13, "test(managed-agent): fix the shell lifecycle recovery journal-head assertions (#14103) (#14108)"
         # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
-        rev = "01d3e6d81a6a6ae14e218f0d7f7b35e2d8f3cf58";
-        hash = "sha256-BSjIL5EVk8ismu2wuEDLsiBSyIpPRG8/eirvfGktpSw=";
+        rev = "163e4686191ddf888a45c1d95b20ac4c646a4e01";
+        hash = "sha256-FxZmtw0mbqRZOIxUyycH5Mhmi5g1Etvn81EBLnQjeG8=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -43,7 +43,7 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-CZcGdh3LOVGm9adJIJzBoQq8oRfKK37i/v0neb/io6o=";
+        hash = "sha256-6mzPUw8TMvZe72qSgiFXTJZB3ECEjw0b8HEVrPLVQt4=";
       };
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
