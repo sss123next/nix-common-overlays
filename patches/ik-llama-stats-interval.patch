@@ -1,0 +1,128 @@
+diff --git a/common/common.cpp b/common/common.cpp
+index aa33cc1c..04b0aad1 100644
+--- a/common/common.cpp
++++ b/common/common.cpp
+@@ -2153,6 +2153,19 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
+         params.fused_idx_topk = false;
+         return true;
+     }
++    if (arg == "--print-stats") {
++        params.print_stats = true;
++        return true;
++    }
++    if (arg == "--no-print-stats") {
++        params.print_stats = false;
++        return true;
++    }
++    if (arg == "--stats-interval") {
++        CHECK_ARG
++        params.log_stats_interval = std::stoi(argv[i]);
++        return true;
++    }
+     if (arg == "--swa-compress") {
+         params.swa_compress = true;
+         return true;
+@@ -3317,6 +3330,9 @@ void gpt_params_print_usage(int /*argc*/, char ** argv, const gpt_params & param
+     options.push_back({ "*",           "       --verbose-prompt",       "print a verbose prompt before generation (default: %s)", params.verbose_prompt ? "true" : "false" });
+     options.push_back({ "*",           "-dr,   --dry-run",       "skip loading tensors in the files"});
+     options.push_back({ "*",           "       --no-display-prompt",    "don't print prompt at generation (default: %s)", !params.display_prompt ? "true" : "false" });
++    options.push_back({ "*",           "       --print-stats",          "print per-request timing stats to stdout (default: %s)", params.print_stats ? "enabled" : "disabled" });
++    options.push_back({ "*",           "       --no-print-stats",       "disable printing of tok/s timing stats to stdout (default: %s)", !params.print_stats ? "enabled" : "disabled" });
++    options.push_back({ "*",           "       --stats-interval N",     "print periodic throughput stats every N seconds on stdout (0 = off, default: 0)" });
+     options.push_back({ "*",           "-co,   --color",                "colorize output to distinguish prompt and user input from generations (default: %s)", params.use_color ? "true" : "false" });
+     options.push_back({ "*",           "-s,    --seed SEED",            "RNG seed (default: %d, use random seed for < 0)", params.seed });
+     options.push_back({ "*",           "-t,    --threads N",            "number of threads to use during generation (default: %d)", params.n_threads });
+@@ -5800,6 +5816,8 @@ void yaml_dump_non_result_info(FILE * stream, const gpt_params & params, const l
+     fprintf(stream, "adaptive_updt_w_cur: %s # default: false\n", sparams.adaptive_updt_w_cur ? "true" : "false");
+     fprintf(stream, "verbose_prompt: %s # default: false\n", params.verbose_prompt ? "true" : "false");
+     fprintf(stream, "display_prompt: %s # default: true\n", params.display_prompt ? "true" : "false");
++    fprintf(stream, "print_stats: %s # default: true\n", params.print_stats ? "true" : "false");
++    fprintf(stream, "log_stats_interval: %d # default: 0 (seconds between periodic throughput stats)\n", params.log_stats_interval);
+ }
+ 
+ //
+diff --git a/common/common.h b/common/common.h
+index 78175f6e..85dde8ff 100644
+--- a/common/common.h
++++ b/common/common.h
+@@ -467,6 +467,8 @@ struct gpt_params {
+     bool use_mlock         = false; // use mlock to keep model in memory
+     bool verbose_prompt    = false; // print prompt tokens before generation
+     bool display_prompt    = true;  // print prompt before generation
++    bool print_stats       = true;  // print per-request timing stats (tok/s) to stdout
++    int32_t log_stats_interval = 0; // seconds between periodic throughput stats on stdout (0 = off)
+     bool infill            = false; // use infill mode
+     bool dump_kv_cache     = false; // dump the KV cache contents for debugging purposes
+     bool no_kv_offload     = false; // disable KV offloading
+diff --git a/examples/server/server-context.cpp b/examples/server/server-context.cpp
+index a0b05a55..1f055ab6 100644
+--- a/examples/server/server-context.cpp
++++ b/examples/server/server-context.cpp
+@@ -397,6 +397,7 @@ void server_context::init() {
+ 
+         slot.params.speculative = params_base.speculative;
+         slot.sparams = params_base.sparams;
++        slot.print_stats = params_base.print_stats;
+         // try speculative decoding
+         if (can_spec && requested_spec) {
+             switch (common_speculative_try_init(params_base.speculative, slot.ctx, &slot.spec)) {
+@@ -889,6 +890,8 @@ size_t server_slot::find_stopping_strings(const std::string& text, const size_t
+ }
+ 
+ void server_slot::print_timings() const {
++    if (!print_stats) return;
++
+     char buffer[512];
+     double t_prompt = t_prompt_processing / n_prompt_tokens_processed;
+     double n_prompt_second = 1e3 / t_prompt_processing * n_prompt_tokens_processed;
+diff --git a/examples/server/server-context.h b/examples/server/server-context.h
+index dae6eff1..7850c189 100644
+--- a/examples/server/server-context.h
++++ b/examples/server/server-context.h
+@@ -31,6 +31,7 @@ struct server_slot {
+ 
+     struct slot_params params;
+ 
++    bool print_stats = true; // print per-request timing stats (tok/s) to stdout
+     bool released = false;
+     slot_state state = SLOT_STATE_IDLE;
+     slot_command command = SLOT_COMMAND_NONE;
+diff --git a/examples/server/server.cpp b/examples/server/server.cpp
+index d6032796..e8450f2a 100644
+--- a/examples/server/server.cpp
++++ b/examples/server/server.cpp
+@@ -2364,6 +2364,34 @@ int main(int argc, char ** argv) {
+ 
+     ctx_server.queue_tasks.start_loop();
+ 
++    // Periodic throughput stats on stdout (see gpt_params::log_stats_interval)
++    if (params.log_stats_interval > 0) {
++        const int64_t interval_ms = params.log_stats_interval * 1000;
++        std::thread([&]() {
++            double   prev_us       = ggml_time_us();
++            uint64_t prev_prompt   = ctx_server.metrics.n_prompt_tokens_processed_total;
++            uint64_t prev_gen      = ctx_server.metrics.n_tokens_predicted_total;
++            while (state.load() == SERVER_STATE_READY) {
++                std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
++                double now_us  = ggml_time_us();
++                double dt      = (now_us - prev_us) / 1e6;
++                uint64_t cur_p = ctx_server.metrics.n_prompt_tokens_processed_total;
++                uint64_t cur_g = ctx_server.metrics.n_tokens_predicted_total;
++                if (dt > 0.0) {
++                    json stats = {
++                        {"prompt_per_second",      (cur_p - prev_prompt) / dt},
++                        {"predicted_per_second",   (cur_g - prev_gen) / dt},
++                        {"elapsed_sec",            dt},
++                    };
++                    LOG_INFO("stats", stats);
++                }
++                prev_us    = now_us;
++                prev_prompt = cur_p;
++                prev_gen   = cur_g;
++            }
++        }).detach();
++    }
++
+     svr->stop();
+     t.join();
+ 
