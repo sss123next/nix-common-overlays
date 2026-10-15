@@ -9,13 +9,13 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: {
       pname = "kun";
-      version = "0.3.12";
+      version = "0.4.0";
 
       src = fetchFromGitHub {
         owner = "KunAgent";
         repo = "Kun";
-        rev = "v0.3.12";
-        hash = "sha256-6ITwbs733Tn6s8TaCRhalY2obxrZgJqzeICaZfuVfOU=";
+        rev = "v0.4.0";
+        hash = "sha256-9PooQUVscS/Nw1Xuu540DIU7zxdwPZm6vaOyLETZ4l8=";
       };
 
       # Two separate lockfiles — root (kun-gui workspaces) and kun/ subtree (CLI).
@@ -61,7 +61,7 @@ self: super: {
 
           dontInstall = true;
           outputHashMode = "recursive";
-          hash = "sha256-5iBUCu37vw2cl+qirFBLhWQem6Z3z1EbrZJLalq4FlY=";
+          hash = "sha256-OAI0qv5Xs21Al0lX7k9sVw5psupTEuxTiFIwGDNrMCE=";
         }
       );
 
@@ -87,12 +87,14 @@ self: super: {
       #
       #  * `--legacy-peer-deps` — without it npm ci fails with EUSAGE
       #    ("lock file's @radix-ui/react-popover@1.1.23 does not satisfy
-      #    @radix-ui/react-popover@1.1.6"): the lockfile carries newer
-      #    @radix-ui/* versions than the pinned ranges recorded in
-      #    @excalidraw/excalidraw. Online npm can re-resolve; offline it can't.
+      #    @radix-ui/react-popover@1.1.6"): @excalidraw/excalidraw pins the old
+      #    @radix-ui/* while the lockfile hoists newer ones — 0.4.0 even ships a
+      #    nested @excalidraw/excalidraw/node_modules/.../react-popover@1.1.6
+      #    copy, and npm's sync check still rejects the tree (16 "Invalid:"
+      #    lines). Online npm can re-resolve; offline it can't.
       #
       #  * rxjs in `dependencies` — --legacy-peer-deps makes npm skip every
-      #    `peer: true` lockfile entry (1741 vs 1755 pkgs). rxjs is one of them
+      #    `peer: true` lockfile entry (1741 vs 1752 pkgs). rxjs is one of them
       #    (a peer of @univerjs/core), and without node_modules/rxjs electron-vite
       #    dies with "Rollup failed to resolve import rxjs from
       #    node_modules/@univerjs/core/lib/es/facade.js". Promoting it to a
@@ -110,6 +112,21 @@ self: super: {
           if (!pkg.dependencies.rxjs) pkg.dependencies.rxjs = "^7.8.2";
           fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
         '
+
+        # NixOS ships no /bin/ps. The Kun runtime exec()s it directly — the
+        # owned-process guard (kun/src/process/owned-process-guard.ts) and the
+        # runtime identity probe (kun/src/server/runtime-process-identity.ts) —
+        # and both swallow the ENOENT into "Could not verify owned process
+        # group" / "Owned processes failed to exit" on every shutdown, leaving
+        # spawned runtimes unverified. Point them at procps' ps instead; the
+        # store path lands in the built JS and is picked up by the closure scan
+        # (procps is in buildInputs).
+        for f in \
+          kun/src/process/owned-process-guard.ts \
+          kun/src/server/runtime-process-identity.ts \
+        ; do
+          sed -i "s|'/bin/ps'|'${lib.getExe' procps "ps"}'|g" "$f"
+        done
       '';
 
       makeCacheWritable = true;
@@ -125,6 +142,9 @@ self: super: {
         stdenv.cc.cc
         libXtst
         libxkbcommon
+        # /bin/ps substitute from postPatch — the built JS embeds its store
+        # path, so the closure scan keeps it in runtime closure.
+        procps
       ];
 
       buildPhase = ''
@@ -163,18 +183,43 @@ self: super: {
         ln -s ../../../kun/node_modules "$out/share/kun/out/main/kun/node_modules"
         ln -s ../../../kun/package.json "$out/share/kun/out/main/kun/package.json"
 
+        # src/main/main-paths.ts anchors every preload on app.getAppPath():
+        # <appPath>/out/preload/<name>.cjs (falling back to .mjs). appPath is
+        # out/main — the directory handed to Electron — so the bundles must be
+        # COPIED under out/main/out/preload, otherwise every window starts
+        # without its preload bridge ("failed to load preload ... index.mjs").
+        # Real copy, not a symlink: Electron rejects symlinked sandbox preloads
+        # and ESM realpath handling would break the import.meta.url guard.
+        mkdir -p "$out/share/kun/out/main/out"
+        cp -r "$out/share/kun/out/preload" "$out/share/kun/out/main/out/preload"
+
+        # Same anchoring applies to bundled assets: <appPath>/resources/...
+        # (bundled-skill-resources.ts, bundled-extension-resources.ts). Only the
+        # JS-side trees are copied — resources/whisper alone is 25 MiB of
+        # prebuilt multi-platform binaries that would need patchelf, and that
+        # feature is optional and degrades to "not installed" when absent.
+        mkdir -p "$out/share/kun/out/main/resources"
+        if [ -d resources/bundled-skills ]; then
+          cp -r resources/bundled-skills "$out/share/kun/out/main/resources/"
+        fi
+        if [ -d resources/bundled-extensions ]; then
+          cp -r resources/bundled-extensions "$out/share/kun/out/main/resources/"
+        fi
+
         # electron-updater validates app.getVersion() as semver at startup;
         # "0.0" → ERR_UPDATER_INVALID_VERSION. With FILE launch Electron
         # ignores package.json (falls back to "0.0" for Kun), so the wrapper
         # launches out/main as a DIRECTORY and Electron reads version from
-        # this manifest (0.3.9). "main" must be ./index.js relative to
-        # out/main (root package.json points to ./out/main/index.js — wrong
-        # here). "type": "module" keeps index.js ESM.
+        # this manifest. It must equal the built version: a stale, LOWER value
+        # makes autoUpdater see the app as outdated and re-download a full
+        # update over the read-only store on every launch. "main" must be
+        # ./index.js relative to out/main (root package.json points to
+        # ./out/main/index.js — wrong here). "type": "module" keeps index.js ESM.
         cat > "$out/share/kun/out/main/package.json" <<'PKGEOF'
         {
           "name": "kun-gui",
           "productName": "Kun",
-          "version": "0.3.9",
+          "version": "${finalAttrs.version}",
           "type": "module",
           "main": "./index.js"
         }
