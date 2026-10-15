@@ -41,13 +41,13 @@ in
       pname = "orca-slicer-git";
       # Версия из version.inc (SoftFever_VERSION), git-суффикс пинится здесь:
       # find_package(Git) в main больше не используется.
-      version = "2.5.0-dev-unstable-2026-10-09";
+      version = "2.5.0-dev-unstable-2026-10-15";
     
       src = super.fetchFromGitHub {
         owner = "OrcaSlicer";
         repo = "OrcaSlicer";
-        rev = "6ac7ae24a3b70b2db42b737023ba042079cc844d";
-        hash = "sha256-kplNLz4VlX+eeThA0TZtnPHgy3pHyW4fs79za6DMMmM=";
+        rev = "b75af485ce18225eb338a79ab81333579579e9b8";
+        hash = "sha256-4nLXGr8GHH4Zz5b6z4regg/8Kq0ylYRdFsR6BMvRjKQ=";
       };
     
       __structuredAttrs = true;
@@ -131,11 +131,8 @@ in
         # Убираем небезопасный ilmbase из FindOpenVDB (PrusaSlicer PR 14207).
         ./orca-slicer-git/no-ilmbase.patch
         # Настраиваемая проверка обновлений (PR 7650, ещё не влит в main).
-        (super.fetchpatch {
-          name = "pr-7650-configurable-update-check.patch";
-          url = "https://github.com/OrcaSlicer/OrcaSlicer/commit/300df7c99b0a2173f645c8bf40e8758eb5f2c486.patch";
-          hash = "sha256-hgQeagPhS3aNQoFSq0S+Ch60ygm81uHMIvGopw/AZT8=";
-        })
+        # Локальная копия: контекст hunk'а в GUI_App.cpp обновлён под main.
+        ./orca-slicer-git/pr-7650-configurable-update-check.patch
       ];
     
       postPatch = ''
