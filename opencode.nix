@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-NHaR1GOAZycmwmB+FtQchuZF15Vwy3YfEXYcXCafFxU=";
+            "x86_64-linux"   = "sha256-gEUJ+lCESOj8ut1FPvZpt1plRC8xcvQNXWEufiWZXqA=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -92,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.0.28-pre";
+      version = "2.0.30-pre";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -100,8 +100,8 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "e9def88a7790efc6abace15b67f3625ff4d66237";
-        hash = "sha256-l5UZvFrKgyF3yW5NMn4j1R760hu0JIElGZ643G2kQoI=";
+        rev = "fc2fc596e35e388f51c921d4b68680cb7cd3e439";
+        hash = "sha256-y54pDc+TV73KSc6e9XWbjdzOD/w+BarIU7sJiIC0qQ4=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
@@ -117,10 +117,10 @@ self: super: {
         ./patches/opencode-native-fetch-timeout.patch
         # Raise the session retry budget from 10 attempts (~84s) to 65535 by default so
         # transient provider failures (e.g. HTTP 500) keep retrying for days instead of
-        # failing the step. Override at runtime with OPENCODE_RETRY_ATTEMPTS. Offset: -35 lines.
+        # failing the step. Override at runtime with OPENCODE_RETRY_ATTEMPTS. Applies at offset 0.
         ./patches/opencode-retry-attempts.patch
         # Web GUI: stop generation on Ctrl+G only. Bare Escape still closes popovers and
-        # cancels queue editing, but no longer aborts a running turn (interaction.ts). Offset: +4 lines.
+        # cancels queue editing, but no longer aborts a running turn (interaction.ts). Offset 0.
         ./patches/opencode-esc-no-interrupt.patch
       ];
 
