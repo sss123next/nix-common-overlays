@@ -1,5 +1,5 @@
 diff --git a/common/common.cpp b/common/common.cpp
-index aa33cc1c..04b0aad1 100644
+index c8c0fa9d..3a0a297d 100644
 --- a/common/common.cpp
 +++ b/common/common.cpp
 @@ -2153,6 +2153,19 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
@@ -32,7 +32,7 @@ index aa33cc1c..04b0aad1 100644
      options.push_back({ "*",           "-co,   --color",                "colorize output to distinguish prompt and user input from generations (default: %s)", params.use_color ? "true" : "false" });
      options.push_back({ "*",           "-s,    --seed SEED",            "RNG seed (default: %d, use random seed for < 0)", params.seed });
      options.push_back({ "*",           "-t,    --threads N",            "number of threads to use during generation (default: %d)", params.n_threads });
-@@ -5800,6 +5816,8 @@ void yaml_dump_non_result_info(FILE * stream, const gpt_params & params, const l
+@@ -5799,6 +5815,8 @@ void yaml_dump_non_result_info(FILE * stream, const gpt_params & params, const l
      fprintf(stream, "adaptive_updt_w_cur: %s # default: false\n", sparams.adaptive_updt_w_cur ? "true" : "false");
      fprintf(stream, "verbose_prompt: %s # default: false\n", params.verbose_prompt ? "true" : "false");
      fprintf(stream, "display_prompt: %s # default: true\n", params.display_prompt ? "true" : "false");
@@ -55,7 +55,7 @@ index 78175f6e..85dde8ff 100644
      bool dump_kv_cache     = false; // dump the KV cache contents for debugging purposes
      bool no_kv_offload     = false; // disable KV offloading
 diff --git a/examples/server/server-context.cpp b/examples/server/server-context.cpp
-index a0b05a55..1f055ab6 100644
+index cd1a916f..aa165094 100644
 --- a/examples/server/server-context.cpp
 +++ b/examples/server/server-context.cpp
 @@ -397,6 +397,7 @@ void server_context::init() {
@@ -76,7 +76,7 @@ index a0b05a55..1f055ab6 100644
      double t_prompt = t_prompt_processing / n_prompt_tokens_processed;
      double n_prompt_second = 1e3 / t_prompt_processing * n_prompt_tokens_processed;
 diff --git a/examples/server/server-context.h b/examples/server/server-context.h
-index dae6eff1..7850c189 100644
+index bcc9f79c..adc2493b 100644
 --- a/examples/server/server-context.h
 +++ b/examples/server/server-context.h
 @@ -31,6 +31,7 @@ struct server_slot {
@@ -88,14 +88,14 @@ index dae6eff1..7850c189 100644
      slot_state state = SLOT_STATE_IDLE;
      slot_command command = SLOT_COMMAND_NONE;
 diff --git a/examples/server/server.cpp b/examples/server/server.cpp
-index d6032796..e8450f2a 100644
+index 0c13f833..f39a2183 100644
 --- a/examples/server/server.cpp
 +++ b/examples/server/server.cpp
-@@ -2364,6 +2364,34 @@ int main(int argc, char ** argv) {
+@@ -2364,6 +2364,33 @@ int main(int argc, char ** argv) {
  
      ctx_server.queue_tasks.start_loop();
  
-+    // Periodic throughput stats on stdout (see gpt_params::log_stats_interval)
++    // Periodic throughput stats on stderr (see gpt_params::log_stats_interval)
 +    if (params.log_stats_interval > 0) {
 +        const int64_t interval_ms = params.log_stats_interval * 1000;
 +        std::thread([&]() {
@@ -109,12 +109,11 @@ index d6032796..e8450f2a 100644
 +                uint64_t cur_p = ctx_server.metrics.n_prompt_tokens_processed_total;
 +                uint64_t cur_g = ctx_server.metrics.n_tokens_predicted_total;
 +                if (dt > 0.0) {
-+                    json stats = {
-+                        {"prompt_per_second",      (cur_p - prev_prompt) / dt},
-+                        {"predicted_per_second",   (cur_g - prev_gen) / dt},
-+                        {"elapsed_sec",            dt},
-+                    };
-+                    LOG_INFO("stats", stats);
++                    LOG_INF("\n=== PERIODIC STATS (%.1f s) === prompt_tok/s: %.1f, predicted_tok/s: %.1f, elapsed: %.1f s\n",
++                        dt,
++                        (cur_p - prev_prompt) / dt,
++                        (cur_g - prev_gen) / dt,
++                        dt);
 +                }
 +                prev_us    = now_us;
 +                prev_prompt = cur_p;
