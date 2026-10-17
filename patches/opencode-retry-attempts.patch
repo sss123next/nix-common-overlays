@@ -2,7 +2,7 @@ diff --git a/packages/core/src/session/runner/retry.ts b/packages/core/src/sessi
 index 3032016..35c6f4f 100644
 --- a/packages/core/src/session/runner/retry.ts
 +++ b/packages/core/src/session/runner/retry.ts
-@@ -39,12 +39,15 @@ const retryAfter = (input: Input) => {
+@@ -39,12 +39,15 @@
    return undefined
  }
  
@@ -11,8 +11,8 @@ index 3032016..35c6f4f 100644
 -// cap applies per gap; `max` with `recurs` bounds the count.
 +// Exponential from 2s capped at 10s per gap: 2, 4, 8, then 10s steps with jitter. `min` takes the
 +// faster schedule, so the cap applies per gap; `max` with `recurs` bounds the count. The attempt
-+// count defaults to 65535 — transient provider failures such as HTTP 500 keep retrying for days
-+// instead of giving up after ~84s — and can be overridden with OPENCODE_RETRY_ATTEMPTS.
++// count defaults to 65535 -- transient provider failures such as HTTP 500 keep retrying for days
++// instead of giving up after ~84s -- and can be overridden with OPENCODE_RETRY_ATTEMPTS.
 +const parsedRetries = Number.parseInt(process.env.OPENCODE_RETRY_ATTEMPTS ?? "", 10)
 +const retries = Number.isNaN(parsedRetries) || parsedRetries < 0 ? 65535 : parsedRetries
  const schedule = Schedule.max([
@@ -22,3 +22,18 @@ index 3032016..35c6f4f 100644
  ]).pipe(
    Schedule.jittered,
    Schedule.setInputType<Input>(),
+@@ -56,9 +59,11 @@
+ )
+ 
+ // A timed-out attempt already waited minutes before failing, so the general allowance would let a
+-// dead provider hold a step for most of an hour. Cap those attempts well below it.
+-const MAX_TIMEOUT_RETRIES = 3
+-
++// dead provider hold a step for most of an hour. Cap those attempts to the general retry budget.
++// Override with OPENCODE_TIMEOUT_RETRIES to raise (or set to 0 to disable timeout retries).
++const parsedTimeoutRetries = Number.parseInt(process.env.OPENCODE_TIMEOUT_RETRIES ?? "", 10)
++const maxTimeoutRetries = Number.isNaN(parsedTimeoutRetries) ? retries : parsedTimeoutRetries
++const MAX_TIMEOUT_RETRIES = maxTimeoutRetries
+ const isTimeout = (error: AIError) => error.reason._tag === "Transport" && error.reason.code === "Timeout"
+ 
+ export const policy = (sessionID: SessionSchema.ID) =>
