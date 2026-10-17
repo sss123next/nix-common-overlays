@@ -125,3 +125,106 @@ index 0c13f833..f39a2183 100644
      svr->stop();
      t.join();
  
+diff --git a/examples/server/server-context.cpp b/examples/server/server-context.cpp
+index aa165094..9f34bf92 100644
+--- a/examples/server/server-context.cpp
++++ b/examples/server/server-context.cpp
+@@ -919,6 +919,56 @@ void server_slot::print_timings() const {
+         const_cast<common_params_speculative *>(&params.speculative));
+ }
+ 
++void server_slot::print_timings_tg() {
++    if (!print_stats) return;
++
++    // only print if we have enough decoded tokens
++    if (n_decoded < 100) {
++        return;
++    }
++
++    const int64_t t_now = ggml_time_us();
++
++    // throttle: at most once per 3 seconds
++    if (t_now - t_print_last < 3 * 1000 * 1000) {
++        return;
++    }
++
++    const double n_gen_second = t_token_generation > 0.0
++        ? 1e3 / t_token_generation * n_decoded
++        : 0.0;
++    const double n_gen_second_win = t_now > t_print_last
++        ? 1e6 / (double)(t_now - t_print_last) * (n_decoded - n_gen_last)
++        : 0.0;
++
++    t_print_last = t_now;
++    n_gen_last = n_decoded;
++
++    SLT_INF(*this, "n_gen = %6d, tg = %6.2f t/s, tg_3s = %6.2f t/s\n",
++        (int)n_decoded, n_gen_second, n_gen_second_win);
++}
++
++void server_slot::print_timings_pp() const {
++    if (!print_stats) return;
++
++    const double t_prompt_total = t_prompt_processing;
++
++    // only print if prompt processing takes more than 3 seconds
++    if (t_prompt_total < 3000.0) {
++        return;
++    }
++
++    const double n_prompt_second = t_prompt_processing > 0.0
++        ? 1e3 / t_prompt_processing * n_prompt_tokens_processed
++        : 0.0;
++    const double f_progress = n_prompt_tokens > 0
++        ? (double)n_prompt_tokens_processed / n_prompt_tokens
++        : 0.0;
++
++    SLT_INF(*this, "prompt processing, n_tokens = %6d, progress = %.2f, t = %6.2f s / %.2f tokens per second\n",
++        (int)n_prompt_tokens_processed, f_progress, t_prompt_total / 1e3, n_prompt_second);
++}
++
+ void server_metrics::init() {
+     t_start = ggml_time_us();
+ }
+@@ -4390,6 +4440,9 @@ void server_context::batch_pending_prompt(const int32_t n_ubatch, const int32_t
+ 
+ 
+                     slot.n_prompt_tokens_processed++;
++                    // periodic prompt processing progress
++                    slot.print_timings_pp();
++
+                     slot_npast++;
+                     slot.n_past_prompt++;
+                     slot.n_past++;
+@@ -4607,6 +4660,9 @@ void server_context::speculative_decoding_accept() {
+                 }
+             }
+ 
++            // periodic generation throughput stats
++            slot.print_timings_tg();
++
+             if (slot.ctx_sampling->n_rewind > 0) {
+                 // consume out-of-context tokens
+                 auto banned_n = slot.banned_n;
+diff --git a/examples/server/server-context.h b/examples/server/server-context.h
+index adc2493b..b213c3d0 100644
+--- a/examples/server/server-context.h
++++ b/examples/server/server-context.h
+@@ -32,6 +32,8 @@ struct server_slot {
+     struct slot_params params;
+ 
+     bool print_stats = true; // print per-request timing stats (tok/s) to stdout
++    int64_t t_print_last = 0;  // last time (us) we printed tg stats
++    int32_t n_gen_last   = 0;  // n_decoded at last tg stats print
+     bool released = false;
+     slot_state state = SLOT_STATE_IDLE;
+     slot_command command = SLOT_COMMAND_NONE;
+@@ -211,6 +213,8 @@ struct server_slot {
+     size_t find_stopping_strings(const std::string& text, const size_t last_token_size, bool is_full_stop);
+ 
+     void print_timings() const;
++    void print_timings_tg();
++    void print_timings_pp() const;
+ 
+ };
+ 
