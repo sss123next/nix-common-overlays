@@ -55,7 +55,7 @@ index 78175f6e..85dde8ff 100644
      bool dump_kv_cache     = false; // dump the KV cache contents for debugging purposes
      bool no_kv_offload     = false; // disable KV offloading
 diff --git a/examples/server/server-context.cpp b/examples/server/server-context.cpp
-index cd1a916f..112524c9 100644
+index cd1a916f..5cba41ed 100644
 --- a/examples/server/server-context.cpp
 +++ b/examples/server/server-context.cpp
 @@ -397,6 +397,7 @@ void server_context::init() {
@@ -140,17 +140,7 @@ index cd1a916f..112524c9 100644
  void server_metrics::init() {
      t_start = ggml_time_us();
  }
-@@ -4364,6 +4425,9 @@ void server_context::batch_pending_prompt(const int32_t n_ubatch, const int32_t
-                 int32_t ga_w = slot.ga_w;
-                 const int32_t prompt_batch_i0 = batch.n_tokens;
- 
-+                // periodic prompt-processing progress (printed at most once per decode iteration)
-+                slot.print_timings_pp();
-+
-                 // add prompt tokens for processing in the current batch
-                 // TODO: the self-extend stuff here is a mess - simplify and/or abstract it somehow
-                 while (slot.n_past_prompt < slot.n_prompt_tokens && batch.n_tokens < n_batch) {
-@@ -4604,6 +4668,9 @@ void server_context::speculative_decoding_accept() {
+@@ -4604,6 +4665,9 @@ void server_context::speculative_decoding_accept() {
                  }
              }
  
@@ -160,7 +150,24 @@ index cd1a916f..112524c9 100644
              if (slot.ctx_sampling->n_rewind > 0) {
                  // consume out-of-context tokens
                  auto banned_n = slot.banned_n;
-@@ -5102,6 +5169,9 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
+@@ -5011,6 +5075,16 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
+         }
+     }
+ 
++        // periodic prompt-processing progress, evaluated after the decode so that the time
++        // spent on the chunk that has just been processed is included; this also covers
++        // prompts that fit in a single batch and therefore never re-enter batch_pending_prompt.
++        // Stops automatically once generation has started (t_start_generation != 0).
++        for (auto& slot : slots) {
++            if (slot.prompt_batch_i0 >= 0) {
++                slot.print_timings_pp();
++            }
++        }
++
+         for (auto& slot : slots) {
+             bool is_active_slot = (slot.state == SLOT_STATE_PROCESSING);
+ 
+@@ -5102,6 +5176,9 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
              if (slot.n_decoded == 1) {
                  slot.t_start_generation = ggml_time_us();
                  slot.t_prompt_processing = (slot.t_start_generation - slot.t_start_process_prompt) / 1e3;
@@ -170,7 +177,7 @@ index cd1a916f..112524c9 100644
                  metrics.on_prompt_eval(slot);
                  // create checkpoint after prompt processing ends
                  if (params_base.ctx_checkpoints_tolerance<=0 && params_base.do_checkpoint) {
-@@ -5140,6 +5210,9 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
+@@ -5140,6 +5217,9 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
  
              update_allowlist_state(slot);
  
