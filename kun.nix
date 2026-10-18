@@ -9,13 +9,13 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: {
       pname = "kun";
-      version = "0.4.0";
+      version = "0.4.1";
 
       src = fetchFromGitHub {
         owner = "KunAgent";
         repo = "Kun";
-        rev = "v0.4.0";
-        hash = "sha256-9PooQUVscS/Nw1Xuu540DIU7zxdwPZm6vaOyLETZ4l8=";
+        rev = "v0.4.1";
+        hash = "sha256-LC1FrpnhhVYLgcY2w6dbOFyeUt2FVY1pTl1EkmD8dfs=";
       };
 
       # Two separate lockfiles — root (kun-gui workspaces) and kun/ subtree (CLI).
@@ -61,7 +61,7 @@ self: super: {
 
           dontInstall = true;
           outputHashMode = "recursive";
-          hash = "sha256-OAI0qv5Xs21Al0lX7k9sVw5psupTEuxTiFIwGDNrMCE=";
+          hash = "sha256-zYzypxWGZJsP61ymKM35uIK+MQ7ILJnkUwbfmzqfa5c=";
         }
       );
 
@@ -82,28 +82,20 @@ self: super: {
         npmHooks.npmConfigHook
       ];
 
-      # Why BOTH of these are required (empirically, offline npm ci against the
-      # prefetched npmDeps cache):
+      # Both workarounds below are still required on 0.4.1 — verified by building
+      # without them and running offline `npm ci` against the prefetched cache:
       #
-      #  * `--legacy-peer-deps` — without it npm ci fails with EUSAGE
-      #    ("lock file's @radix-ui/react-popover@1.1.23 does not satisfy
-      #    @radix-ui/react-popover@1.1.6"): @excalidraw/excalidraw pins the old
-      #    @radix-ui/* while the lockfile hoists newer ones — 0.4.0 even ships a
-      #    nested @excalidraw/excalidraw/node_modules/.../react-popover@1.1.6
-      #    copy, and npm's sync check still rejects the tree (16 "Invalid:"
-      #    lines). Online npm can re-resolve; offline it can't.
+      #  * --legacy-peer-deps — the root install passes cleanly without it (all
+      #    1762 packages, rxjs included), but npmConfigHook installs both lockfiles
+      #    in one pass and the kun/ subtree then dies with EUSAGE: "Invalid: lock
+      #    file's @radix-ui/react-* does not satisfy ..." + "Missing: ... from lock
+      #    file" (@excalidraw/excalidraw pins old @radix-ui/* against the hoisted
+      #    tree). Online npm can re-resolve; offline it cannot.
       #
-      #  * rxjs in `dependencies` — --legacy-peer-deps makes npm skip every
-      #    `peer: true` lockfile entry (1741 vs 1752 pkgs). rxjs is one of them
-      #    (a peer of @univerjs/core), and without node_modules/rxjs electron-vite
-      #    dies with "Rollup failed to resolve import rxjs from
-      #    node_modules/@univerjs/core/lib/es/facade.js". Promoting it to a
-      #    direct dependency makes npm install it (1742 pkgs) and lets
-      #    externalizeDepsPlugin externalize it in main/preload instead of
-      #    bundling it — node_modules is shipped in $out, so runtime resolves.
-      #
-      # Only package.json is touched here; package-lock.json stays byte-identical
-      # so npmConfigHook's consistency check against $npmDeps still passes.
+      #  * rxjs in dependencies — --legacy-peer-deps makes npm skip every peer:true
+      #    lockfile entry, and rxjs (a peer of @univerjs/core) is one of them, so
+      #    electron-vite dies with "Rollup failed to resolve import rxjs". Promoting
+      #    it to a direct dependency installs it; node_modules ships in $out.
       postPatch = ''
         node -e '
           const fs = require("fs");
@@ -129,6 +121,8 @@ self: super: {
         done
       '';
 
+      # makeCacheWritable: an offline `npm ci` writes _logs into its cache dir,
+      # which is the read-only npmDeps output.
       makeCacheWritable = true;
       npmFlags = [ "--legacy-peer-deps" ];
 
