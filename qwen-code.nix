@@ -6,15 +6,15 @@ self: super: {
       pname = "qwen-code";
       # No newer release tag yet (package.json on main is still 0.24.6); pinned to
       # the last main commit instead, upstream version embedded by the build is 0.24.6.
-      version = "0.25.1-unstable-2026-10-13";
+      version = "0.25.2-unstable-2026-10-17";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-13, "test(managed-agent): fix the shell lifecycle recovery journal-head assertions (#14103) (#14108)"
+        # main @ 2026-10-17, "test(managed-agent): pin #14387's Turn-row accessors in the lock canary (#14501)"
         # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
-        rev = "163e4686191ddf888a45c1d95b20ac4c646a4e01";
-        hash = "sha256-FxZmtw0mbqRZOIxUyycH5Mhmi5g1Etvn81EBLnQjeG8=";
+        rev = "94f37e86ccda726b8fd9f922b640c8adbaeac3bb";
+        hash = "sha256-VUnhoW92vncy7D88bO9FDBlKE1vopV0vvbRdrtXGZhU=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
