@@ -42,13 +42,13 @@ self: super: {
       pname = "deepseek-harness";
       # No stable tags exist yet (all releases are alpha/rc); pinned to the last
       # master commit instead, upstream version embedded by the build is 0.2.1-alpha.3.
-      version = "0.2.1-alpha.3-unstable-2026-10-14";
+      version = "0.2.1-rc.2-unstable-2026-10-17";
 
       src = fetchFromGitHub {
         owner = "deepseek-ai";
         repo = "deepseek-harness";
-        rev = "571902028a75c64c1d767f4ae5fd099485f0ddf0";
-        hash = "sha256-XXGCcJ7wgRSa2qxTDOyhzYYikCYap8WGITopOpb8HXA=";
+        rev = "687f282e8625c6b8d11ff58211a90524be2e4317";
+        hash = "sha256-WcPs3q4NFTRnH2y1Rc/o7/rvJAOe8s7isoTQYf8APFU=";
       };
 
       # packageManager: pnpm@11.28.5 (nixpkgs pnpm_11 lags a bit; tolerated);
@@ -91,14 +91,14 @@ self: super: {
         fetcherVersion = 4;
         # FOD hash of the materialized store; pinned from the stub-hash build's
         # `got:` output.
-        hash = "sha256-gfDO4Z6Uks1dFLs7A+96tqTKEF1zEbZjVsQZzSQPFYA=";
+        hash = "sha256-C9Aw9AS4r7zubaEuT6mLXQ+AhhMVlTxPZRKTpzRUkcU=";
       };
 
       env.NODE_OPTIONS = "--max-old-space-size=4096";
       # fetchFromGitHub provides no .git; client-build-environment.ts reads this
       # public value instead of spawning `git rev-parse HEAD`, and its dirty
       # probe treats a missing git as "no metadata" (no dirty marker).
-      env.DSH_CLIENT_COMMIT_HASH = "571902028a75c64c1d767f4ae5fd099485f0ddf0";
+      env.DSH_CLIENT_COMMIT_HASH = "687f282e8625c6b8d11ff58211a90524be2e4317";
 
       # `pnpm run build` (scripts/build.ts) = build:native-system (flock Node-API
       # addon; needs the node headers next to process.execPath) + build:lib (tsc
@@ -181,7 +181,7 @@ self: super: {
         v=$($out/bin/dsh --version)
         echo "dsh --version => $v"
         case "$v" in
-          0.2.1-alpha.3*) ;;
+          0.2.1-rc.2*) ;;
           *) echo "ERROR: unexpected dsh version: $v" >&2; exit 1 ;;
         esac
         $out/bin/dsh --help > /dev/null
