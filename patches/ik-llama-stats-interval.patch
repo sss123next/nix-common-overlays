@@ -55,7 +55,7 @@ index 78175f6e..34b28c7a 100644
      bool dump_kv_cache     = false; // dump the KV cache contents for debugging purposes
      bool no_kv_offload     = false; // disable KV offloading
 diff --git a/examples/server/server-context.cpp b/examples/server/server-context.cpp
-index cd1a916f..5296ed5d 100644
+index cd1a916f..ce4e2ba0 100644
 --- a/examples/server/server-context.cpp
 +++ b/examples/server/server-context.cpp
 @@ -397,6 +397,8 @@ void server_context::init() {
@@ -76,7 +76,7 @@ index cd1a916f..5296ed5d 100644
      char buffer[512];
      double t_prompt = t_prompt_processing / n_prompt_tokens_processed;
      double n_prompt_second = 1e3 / t_prompt_processing * n_prompt_tokens_processed;
-@@ -916,6 +920,167 @@ void server_slot::print_timings() const {
+@@ -916,6 +920,184 @@ void server_slot::print_timings() const {
          const_cast<common_params_speculative *>(&params.speculative));
  }
  
@@ -179,6 +179,8 @@ index cd1a916f..5296ed5d 100644
 +
 +// Periodic per-slot stats, printed by the stats thread every gpt_params::log_stats_interval
 +// seconds. The rows are built from the published snapshots, never from the slots directly.
++// Only the slots that moved since the previous tick get a row: an idle slot, or one whose
++// batch is still inside llama_decode() with nothing committed, stays silent.
 +void server_context::print_periodic_stats() {
 +    const int32_t interval_s = params_base.log_stats_interval;
 +    if (interval_s <= 0) {
@@ -203,6 +205,20 @@ index cd1a916f..5296ed5d 100644
 +
 +        if (snap.phase == SLOT_STATS_PROMPT) {
 +            win.in_generation = false;
++
++            if (snap.n_prompt_tokens_decoded < win.n_prompt_last) {
++                // a new prompt started on this slot
++                win.n_prompt_last = 0;
++            }
++
++            // only the prompt chunks that finished since the previous tick are worth a row:
++            // a chunk still inside llama_decode() has no progress to report
++            const bool moved = snap.n_prompt_tokens_decoded != win.n_prompt_last;
++            win.n_prompt_last = snap.n_prompt_tokens_decoded;
++            if (!moved) {
++                continue;
++            }
++
 +            log_stats_row("print_timings_pp", snap.id, snap.task_id,
 +                stats_row_prompt_processing(snap.n_prompt_tokens_decoded, snap.n_prompt_tokens,
 +                    t_now - snap.t_start_process_prompt));
@@ -210,41 +226,42 @@ index cd1a916f..5296ed5d 100644
 +        }
 +
 +        if (snap.phase == SLOT_STATS_GENERATION) {
-+            // the window starts at the first decoded token and then runs from one row to the
-+            // next, so that tg_<interval>s always covers one interval
++            // the window starts at the first decoded token and then runs tick to tick, so
++            // that tg_<interval>s always covers the interval it is labelled with
 +            if (!win.in_generation) {
 +                win.in_generation = true;
 +                win.t_last        = snap.t_start_generation;
 +                win.n_gen_last    = 0;
 +            }
 +
-+            if (snap.n_decoded < 100) {
-+                // as upstream: not enough decoded tokens to average over yet
-+                continue;
-+            }
-+
 +            const double t_window  = t_now > win.t_last ? (double)(t_now - win.t_last) / 1e6 : 0.0;
 +            const double tg_window = t_window > 0.0 ? (snap.n_decoded - win.n_gen_last) / t_window : 0.0;
 +            const double t_gen     = (double)(t_now - snap.t_start_generation) / 1e6;
 +
++            const bool moved = snap.n_decoded != win.n_gen_last;
 +            win.t_last     = t_now;
 +            win.n_gen_last = snap.n_decoded;
++
++            // as upstream: not enough decoded tokens to average over yet; and nothing new was
++            // generated during this interval (the slot is waiting for its client or release)
++            if (!moved || snap.n_decoded < 100) {
++                continue;
++            }
 +
 +            log_stats_row("print_timings_tg", snap.id, snap.task_id,
 +                stats_row_generation(snap.n_decoded, t_gen, tg_window, interval_s));
 +            continue;
 +        }
 +
-+        win.in_generation = false;
-+        win.t_last        = 0;
-+        win.n_gen_last    = 0;
++        // idle: drop the bookkeeping, so that the next request starts from a clean window
++        win = slot_stats_window();
 +    }
 +}
 +
  void server_metrics::init() {
      t_start = ggml_time_us();
  }
-@@ -4646,6 +4811,15 @@ void server_context::release_slot_after_final_response(server_slot & slot) {
+@@ -4646,6 +4828,15 @@ void server_context::release_slot_after_final_response(server_slot & slot) {
      slot.release();
      slot.released = true;
      metrics.on_prediction(slot);
@@ -260,7 +277,7 @@ index cd1a916f..5296ed5d 100644
  }
  
  void server_context::send_token_results(completion_token_outputs& results, server_slot& slot, int32_t n) {
-@@ -5100,6 +5274,9 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
+@@ -5100,6 +5291,9 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
              const int64_t t_current = ggml_time_us();
  
              if (slot.n_decoded == 1) {
@@ -270,7 +287,7 @@ index cd1a916f..5296ed5d 100644
                  slot.t_start_generation = ggml_time_us();
                  slot.t_prompt_processing = (slot.t_start_generation - slot.t_start_process_prompt) / 1e3;
                  metrics.on_prompt_eval(slot);
-@@ -5292,6 +5469,10 @@ void server_context::update_slots() {
+@@ -5292,6 +5486,10 @@ void server_context::update_slots() {
          }
      }
  
@@ -282,7 +299,7 @@ index cd1a916f..5296ed5d 100644
      process_batch_tokens(n_batch); // Decode with batch
  
 diff --git a/examples/server/server-context.h b/examples/server/server-context.h
-index bcc9f79c..2ea31cb1 100644
+index bcc9f79c..1fe98ed1 100644
 --- a/examples/server/server-context.h
 +++ b/examples/server/server-context.h
 @@ -7,6 +7,7 @@
@@ -310,14 +327,17 @@ index bcc9f79c..2ea31cb1 100644
  
  };
  
-@@ -236,6 +240,34 @@ struct server_metrics {
+@@ -236,6 +240,39 @@ struct server_metrics {
      void reset_bucket();
  };
  
 +// Periodic per-slot stats (gpt_params::log_stats_interval). The queue thread publishes
 +// snapshots (it is the only thread allowed to touch server_slot), the stats thread prints
 +// them at the requested interval, so that the rows keep their cadence even while the queue
-+// thread is blocked inside llama_decode().
++// thread is blocked inside llama_decode(). A row is printed only for the slots that made
++// progress since the previous tick (tokens loaded or generated): while a slot is idle, or
++// while its batch sits inside llama_decode() without anything committed yet, it stays silent
++// instead of repeating the same numbers.
 +enum slot_stats_phase {
 +    SLOT_STATS_IDLE,
 +    SLOT_STATS_PROMPT,
@@ -335,17 +355,19 @@ index bcc9f79c..2ea31cb1 100644
 +    int64_t t_start_generation      = 0;
 +};
 +
-+// per-slot bookkeeping of the stats thread (the tg_<interval>s column)
++// per-slot bookkeeping of the stats thread: the counters as of the previous tick, used both
++// as the tg_<interval>s window and to detect whether anything moved since then
 +struct slot_stats_window {
 +    bool    in_generation = false;
-+    int64_t t_last        = 0;
-+    int32_t n_gen_last    = 0;
++    int64_t t_last        = 0; // time of the previous tick
++    int32_t n_prompt_last = 0; // prompt tokens decoded at the previous tick
++    int32_t n_gen_last    = 0; // tokens generated at the previous tick
 +};
 +
  struct server_context {
      llama_model* model = nullptr;
      llama_context* ctx = nullptr;
-@@ -277,6 +309,12 @@ struct server_context {
+@@ -277,6 +314,12 @@ struct server_context {
  
      server_metrics metrics;
  
@@ -358,7 +380,7 @@ index bcc9f79c..2ea31cb1 100644
      common_chat_templates_ptr chat_templates;
      server_chat_params  chat_params;
      std::map<std::string, bool> chat_template_caps;
-@@ -363,6 +401,10 @@ struct server_context {
+@@ -363,6 +406,10 @@ struct server_context {
  
      void update_slots();
  
