@@ -55,7 +55,7 @@ index 78175f6e..34b28c7a 100644
      bool dump_kv_cache     = false; // dump the KV cache contents for debugging purposes
      bool no_kv_offload     = false; // disable KV offloading
 diff --git a/examples/server/server-context.cpp b/examples/server/server-context.cpp
-index cd1a916f..0ecdee43 100644
+index cd1a916f..55059607 100644
 --- a/examples/server/server-context.cpp
 +++ b/examples/server/server-context.cpp
 @@ -397,6 +397,8 @@ void server_context::init() {
@@ -76,7 +76,7 @@ index cd1a916f..0ecdee43 100644
      char buffer[512];
      double t_prompt = t_prompt_processing / n_prompt_tokens_processed;
      double n_prompt_second = 1e3 / t_prompt_processing * n_prompt_tokens_processed;
-@@ -916,6 +920,180 @@ void server_slot::print_timings() const {
+@@ -916,6 +920,222 @@ void server_slot::print_timings() const {
          const_cast<common_params_speculative *>(&params.speculative));
  }
  
@@ -177,11 +177,45 @@ index cd1a916f..0ecdee43 100644
 +    }
 +}
 +
++// Drop everything published for a slot. Called when the slot is released: the queue thread
++// may not reach another publish for a long time (it is about to block on the task queue), and
++// a stale snapshot would keep the stats thread printing rows for a slot that has nothing left
++// to report - a disconnected client used to leave a generation phase behind that way.
++void server_context::clear_slot_stats(int32_t slot_id) {
++    std::lock_guard<std::mutex> lock(stats_mutex);
++
++    if (slot_id >= 0 && (size_t) slot_id < stats_snapshots.size()) {
++        stats_snapshots[slot_id] = slot_stats_snapshot();
++    }
++}
++
++// Flag the slots the decode that is about to run will work on, so that the stats thread can
++// tell a slow decode (generation is happening, the counters just cannot move yet) from a slot
++// that merely sits in the processing state while nothing is being decoded.
++void server_context::mark_slots_decoding(bool on) {
++    std::lock_guard<std::mutex> lock(stats_mutex);
++
++    if (stats_snapshots.size() != slots.size()) {
++        return;
++    }
++
++    for (size_t i = 0; i < slots.size(); ++i) {
++        if (on) {
++            if (slots[i].i_batch >= 0) {
++                stats_snapshots[i].decoding = true;
++            }
++        } else {
++            stats_snapshots[i].decoding = false;
++        }
++    }
++}
++
 +// Periodic per-slot stats, printed by the stats thread every gpt_params::log_stats_interval
 +// seconds. The rows are built from the published snapshots, never from the slots directly.
-+// A slot that is generating reports on every tick (a slow generation must not be mistaken
-+// for a stalled one), a prompt row is printed only once a chunk was committed since the
-+// previous tick, and an idle slot stays silent.
++// A generating slot reports on every tick of its decode (a slow generation must not be
++// mistaken for a stalled one), a prompt row is printed only once a chunk was committed since
++// the previous tick, and a slot that is left in the processing state with nothing being
++// decoded stays silent.
 +void server_context::print_periodic_stats() {
 +    const int32_t interval_s = params_base.log_stats_interval;
 +    if (interval_s <= 0) {
@@ -239,11 +273,19 @@ index cd1a916f..0ecdee43 100644
 +            const double tg_window = t_window > 0.0 ? (snap.n_decoded - win.n_gen_last) / t_window : 0.0;
 +            const double t_gen     = (double)(t_now - snap.t_start_generation) / 1e6;
 +
++            const bool moved = snap.n_decoded != win.n_gen_last;
++
 +            win.t_last     = t_now;
 +            win.n_gen_last = snap.n_decoded;
 +
-+            // a slot that is generating gets its row every interval, no exceptions: a slow
-+            // generation must not look like a stalled one
++            // a slot that is decoding gets its row every interval, no exceptions: a slow
++            // generation must not look like a stalled one. A slot that merely carries the
++            // processing state around (finished, cancelled, waiting for its client) neither
++            // decodes nor reports, so it stays silent until it is released
++            if (!moved && !snap.decoding) {
++                continue;
++            }
++
 +            log_stats_row("print_timings_tg", snap.id, snap.task_id,
 +                stats_row_generation(snap.n_decoded, t_gen, tg_window, interval_s));
 +            continue;
@@ -257,23 +299,39 @@ index cd1a916f..0ecdee43 100644
  void server_metrics::init() {
      t_start = ggml_time_us();
  }
-@@ -4646,6 +4824,15 @@ void server_context::release_slot_after_final_response(server_slot & slot) {
+@@ -3586,6 +3806,10 @@ void server_context::release_slots()
+                 {"truncated",       slot.truncated}
+                 });
+ 
++            // the slot has nothing to report anymore, and the queue thread may block before
++            // it publishes again: forget it now instead of leaving a phase behind
++            clear_slot_stats(slot.id);
++
+             queue_tasks.notify_slot_changed();
+         }
+     }
+@@ -4646,6 +4870,10 @@ void server_context::release_slot_after_final_response(server_slot & slot) {
      slot.release();
      slot.released = true;
      metrics.on_prediction(slot);
 +
 +    // stop the periodic stats for this slot right away: the queue thread may not reach
 +    // another decode (and therefore another publish) for a while
-+    {
-+        std::lock_guard<std::mutex> lock(stats_mutex);
-+        if (slot.id >= 0 && (size_t) slot.id < stats_snapshots.size()) {
-+            stats_snapshots[slot.id].phase = SLOT_STATS_IDLE;
-+        }
-+    }
++    clear_slot_stats(slot.id);
  }
  
  void server_context::send_token_results(completion_token_outputs& results, server_slot& slot, int32_t n) {
-@@ -5100,6 +5287,9 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
+@@ -4941,7 +5169,9 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
+             0, 0, 0, // unused
+         };
+ 
++        mark_slots_decoding(true);
+         const int ret = server_decode(ctx, batch_view);
++        mark_slots_decoding(false);
+         if (ret != 0) {
+             if (n_batch == 1 || ret < 0) {
+                 int user_cancel = -3;
+@@ -5100,6 +5330,9 @@ void server_context::process_batch_tokens(int32_t & n_batch) {
              const int64_t t_current = ggml_time_us();
  
              if (slot.n_decoded == 1) {
@@ -283,7 +341,7 @@ index cd1a916f..0ecdee43 100644
                  slot.t_start_generation = ggml_time_us();
                  slot.t_prompt_processing = (slot.t_start_generation - slot.t_start_process_prompt) / 1e3;
                  metrics.on_prompt_eval(slot);
-@@ -5292,6 +5482,10 @@ void server_context::update_slots() {
+@@ -5292,6 +5525,10 @@ void server_context::update_slots() {
          }
      }
  
@@ -295,7 +353,7 @@ index cd1a916f..0ecdee43 100644
      process_batch_tokens(n_batch); // Decode with batch
  
 diff --git a/examples/server/server-context.h b/examples/server/server-context.h
-index bcc9f79c..1d2f3263 100644
+index bcc9f79c..70616fa8 100644
 --- a/examples/server/server-context.h
 +++ b/examples/server/server-context.h
 @@ -7,6 +7,7 @@
@@ -323,16 +381,17 @@ index bcc9f79c..1d2f3263 100644
  
  };
  
-@@ -236,6 +240,38 @@ struct server_metrics {
+@@ -236,6 +240,40 @@ struct server_metrics {
      void reset_bucket();
  };
  
 +// Periodic per-slot stats (gpt_params::log_stats_interval). The queue thread publishes
 +// snapshots (it is the only thread allowed to touch server_slot), the stats thread prints
 +// them at the requested interval, so that the rows keep their cadence even while the queue
-+// thread is blocked inside llama_decode(). A slot that is generating reports on every tick;
-+// a prompt-processing slot reports only once a chunk was committed since the previous tick
-+// (a batch sitting inside llama_decode() has no progress to show); an idle slot stays silent.
++// thread is blocked inside llama_decode(). A slot reports while it is working: a generating
++// slot on every tick of its decode (a slow generation must not be mistaken for a stalled
++// one), a prompt-processing slot only once a chunk was committed since the previous tick,
++// and a slot that sits in the processing state without a decode running stays silent.
 +enum slot_stats_phase {
 +    SLOT_STATS_IDLE,
 +    SLOT_STATS_PROMPT,
@@ -348,6 +407,7 @@ index bcc9f79c..1d2f3263 100644
 +    int32_t n_decoded               = 0;
 +    int64_t t_start_process_prompt  = 0;
 +    int64_t t_start_generation      = 0;
++    bool    decoding                = false; // a decode covering this slot is in flight
 +};
 +
 +// per-slot bookkeeping of the stats thread: the counters as of the previous tick, used both
@@ -362,7 +422,7 @@ index bcc9f79c..1d2f3263 100644
  struct server_context {
      llama_model* model = nullptr;
      llama_context* ctx = nullptr;
-@@ -277,6 +313,12 @@ struct server_context {
+@@ -277,6 +315,12 @@ struct server_context {
  
      server_metrics metrics;
  
@@ -375,11 +435,15 @@ index bcc9f79c..1d2f3263 100644
      common_chat_templates_ptr chat_templates;
      server_chat_params  chat_params;
      std::map<std::string, bool> chat_template_caps;
-@@ -363,6 +405,10 @@ struct server_context {
+@@ -363,6 +407,14 @@ struct server_context {
  
      void update_slots();
  
 +    void publish_slot_stats();
++
++    void clear_slot_stats(int32_t slot_id);
++
++    void mark_slots_decoding(bool on);
 +
 +    void print_periodic_stats();
 +
