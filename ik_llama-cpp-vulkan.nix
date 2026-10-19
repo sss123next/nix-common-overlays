@@ -29,7 +29,7 @@ self: super: {
 
         # --print-stats / --no-print-stats / --stats-interval N: тонкий вывод
         # таймингов и периодической статистики пропуска сервером.
-        patches = [ ./patches/ik-llama-stats-interval.patch ];
+        patches = [ ./patches/ik-llama-stats-interval.patch ./patches/ik-llama-fix-vk-host-buffer.patch  ];
 
         # Базовый уровень инструкций — AVX2. -march=native не использовать:
         # сборка идёт на удалённых билдерах, целевая машина неизвестна.
