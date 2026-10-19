@@ -1,52 +1,52 @@
-[1mdiff --git a/src/llama.cpp b/src/llama.cpp[m
-[1mindex e170df2a..fb24d38e 100644[m
-[1m--- a/src/llama.cpp[m
-[1m+++ b/src/llama.cpp[m
-[36m@@ -4669,13 +4669,18 @@[m [mstatic bool llm_load_tensors([m
-     bool use_mmap_buffer = true;[m
- [m
-     // there is very little benefit to offloading the input layer, so always keep it on the CPU[m
-[31m-    model.buft_input = llama_default_buffer_type_cpu(true);[m
-[32m+[m[32m    // Use host buffer only when GPU layers are actually offloaded (n_gpu_layers > 0).[m
-[32m+[m[32m    // On Vulkan builds llama_default_buffer_type_cpu(true) returns a Vulkan_Host buffer[m
-[32m+[m[32m    // whose suballocation block size (1 GB by default) is too small for large tensors[m
-[32m+[m[32m    // (e.g. MoE experts >2 GB) and can cause GPU hangs on DG2/Arc A380.[m
-[32m+[m[32m    const bool use_host_buffer = n_gpu_layers > 0;[m
-[32m+[m[32m    model.buft_input = llama_default_buffer_type_cpu(use_host_buffer);[m
- [m
-     model.buft_layer.resize(n_layer);[m
- [m
-     // assign cpu layers[m
-     for (int i = 0; i < i_gpu_start; ++i) {[m
-[31m-        model.buft_layer[i] = llama_default_buffer_type_cpu(true);[m
-[32m+[m[32m        model.buft_layer[i] = llama_default_buffer_type_cpu(use_host_buffer);[m
-     }[m
- [m
-     std::vector<size_t> device_mem(model.devices.size());[m
-[36m@@ -4955,7 +4960,7 @@[m [mstatic bool llm_load_tensors([m
-                 for (int il = 0; il < i_gpu_start; ++il) {[m
-                     model.default_layer_device[il] = -1;[m
-                     if (il < n_layer) {[m
-[31m-                        model.buft_layer[il] = llama_default_buffer_type_cpu(true);[m
-[32m+[m[32m                        model.buft_layer[il] = llama_default_buffer_type_cpu(n_gpu_layers > 0);[m
-                     }[m
-                 }[m
-             }[m
-[36m@@ -4984,7 +4989,7 @@[m [mstatic bool llm_load_tensors([m
-         if (n_gpu_layers > n_layer) {[m
-             model.buft_output = llama_default_buffer_type_offload(model, model.devices[model.default_layer_device[n_layer]]);[m
-         } else {[m
-[31m-            model.buft_output = llama_default_buffer_type_cpu(true);[m
-[32m+[m[32m            model.buft_output = llama_default_buffer_type_cpu(n_gpu_layers > 0);[m
-         }[m
-     } else {[m
-         ggml_backend_buffer_type_t split_buft;[m
-[36m@@ -5023,7 +5028,7 @@[m [mstatic bool llm_load_tensors([m
-                     ? 0 : std::max(0, model.default_layer_device[last_gpu_layer]);[m
-             model.buft_output = llama_default_buffer_type_offload(model, dev);[m
-         } else {[m
-[31m-            model.buft_output = llama_default_buffer_type_cpu(true);[m
-[32m+[m[32m            model.buft_output = llama_default_buffer_type_cpu(use_host_buffer);[m
-         }[m
-     }[m
- [m
+diff --git a/src/llama.cpp b/src/llama.cpp
+index 95874de..73d767a 100644
+--- a/src/llama.cpp
++++ b/src/llama.cpp
+@@ -4669,13 +4669,18 @@ static bool llm_load_tensors(
+     bool use_mmap_buffer = true;
+ 
+     // there is very little benefit to offloading the input layer, so always keep it on the CPU
+-    model.buft_input = llama_default_buffer_type_cpu(true);
++    // Use host buffer only when GPU layers are actually offloaded (n_gpu_layers > 0).
++    // On Vulkan builds llama_default_buffer_type_cpu(true) returns a Vulkan_Host buffer
++    // whose suballocation block size (1 GB by default) is too small for large tensors
++    // (e.g. MoE experts >2 GB) and can cause GPU hangs on DG2/Arc A380.
++    const bool use_host_buffer = n_gpu_layers > 0;
++    model.buft_input = llama_default_buffer_type_cpu(use_host_buffer);
+ 
+     model.buft_layer.resize(n_layer);
+ 
+     // assign cpu layers
+     for (int i = 0; i < i_gpu_start; ++i) {
+-        model.buft_layer[i] = llama_default_buffer_type_cpu(true);
++        model.buft_layer[i] = llama_default_buffer_type_cpu(use_host_buffer);
+     }
+ 
+     std::vector<size_t> device_mem(model.devices.size());
+@@ -4955,7 +4960,7 @@ static bool llm_load_tensors(
+                 for (int il = 0; il < i_gpu_start; ++il) {
+                     model.default_layer_device[il] = -1;
+                     if (il < n_layer) {
+-                        model.buft_layer[il] = llama_default_buffer_type_cpu(true);
++                        model.buft_layer[il] = llama_default_buffer_type_cpu(n_gpu_layers > 0);
+                     }
+                 }
+             }
+@@ -4984,7 +4989,7 @@ static bool llm_load_tensors(
+         if (n_gpu_layers > n_layer) {
+             model.buft_output = llama_default_buffer_type_offload(model, model.devices[model.default_layer_device[n_layer]]);
+         } else {
+-            model.buft_output = llama_default_buffer_type_cpu(true);
++            model.buft_output = llama_default_buffer_type_cpu(n_gpu_layers > 0);
+         }
+     } else {
+         ggml_backend_buffer_type_t split_buft;
+@@ -5023,7 +5028,7 @@ static bool llm_load_tensors(
+                     ? 0 : std::max(0, model.default_layer_device[last_gpu_layer]);
+             model.buft_output = llama_default_buffer_type_offload(model, dev);
+         } else {
+-            model.buft_output = llama_default_buffer_type_cpu(true);
++            model.buft_output = llama_default_buffer_type_cpu(use_host_buffer);
+         }
+     }
+ 
