@@ -15,12 +15,10 @@ self: super: {
           ref = "master";
           submodules = true;
         };
-        buildInputs = old.buildInputs ++ [ super.libwebp super.libwebm ];
+        buildInputs = old.buildInputs ++ [ super.libwebp ];
         cmakeFlags = (old.cmakeFlags or [ ]) ++ [
           (super.lib.cmakeBool "SD_WEBP" true)
           (super.lib.cmakeBool "SD_USE_SYSTEM_WEBP" true)
-          (super.lib.cmakeBool "SD_WEBM" true)
-          (super.lib.cmakeBool "SD_USE_SYSTEM_WEBM" true)
         ];
       });
 }
