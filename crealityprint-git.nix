@@ -147,7 +147,8 @@ in
 
   crealityprint-git = clangStdenv.mkDerivation (finalAttrs: {
     pname = "crealityprint-git";
-    version = "7.0.0-unstable-2026-10-10";
+    # rev ниже = тег v7.3.0 (7.3.0.6157 — номер сборки из релизных артефактов).
+    version = "7.3.0";
 
     src = super.fetchFromGitHub {
       owner = "CrealityOfficial";
@@ -227,11 +228,10 @@ in
     patches = [
       # OpenVDB: убираем поиск IlmBase (в nixpkgs он часть OpenEXR/Imath)
       ./orca-slicer-git/no-ilmbase.patch
-      # Закрытые Creality-библиотеки (CR_TPMS, CR_KM_RECIPE, CR_FILLTENSOR):
-      # заменяем FATAL_ERROR на STATUS, убираем ARM64-проверки
-      ./crealityprint-git/closed-source-optional.patch
-      ./crealityprint-git/closed-source-optional-2.patch
-      # (PahoMqttCpp: nixpkgs собирает shared, а не static — чиним в postPatch)
+      # (Закрытые Creality-библиотеки CR_TPMS/CR_KM_RECIPE/CR_FILLTENSOR не
+      # патчим: в репозитории лежат готовые linux/x86_64-архивы, см. cmakeFlags
+      # и NIX_CFLAGS_COMPILE. PahoMqttCpp: nixpkgs собирает shared, а не
+      # static — чиним в postPatch)
     ];
 
     postPatch = ''
@@ -239,14 +239,9 @@ in
       # MetaRTC упакован (см. metartc в let-блоке) — заголовки пробрасываем
       # через NIX_CFLAGS_COMPILE (-I${metartc}/include/metartc).
 
-      # Подкладываем stub-заголовки для закрытых библиотек в include path
-      mkdir -p _stub_include
-      cp ${./crealityprint-git/cr_tpms_library.h} _stub_include/cr_tpms_library.h
-      cp ${./crealityprint-git/cr_km_recipe.h} _stub_include/cr_km_recipe.h
-      cp ${./crealityprint-git/cr_FillTensor_library.h} _stub_include/cr_FillTensor_library.h
-      # Глобальный include для всех таргетов под src/ (NIX_CFLAGS_COMPILE
-      # не экспандит $PWD, поэтому через CMake)
-      sed -i '1a include_directories(''${CMAKE_SOURCE_DIR}/_stub_include)' src/CMakeLists.txt
+      # Закрытые Creality-библиотеки: заголовки и .a берём из deps/ (см.
+      # cmakeFlags/NIX_CFLAGS_COMPILE) — TPMS-infill, цветоделение и FillTensor
+      # работают как в официальных сборках.
 
       # set(OpenCASCADE_DIR ''${CMAKE_PREFIX_PATH}/lib/cmake/occt) указывает на
       # deps-супербилд, а в nixpkgs конфиг OCCT лежит в lib/cmake/opencascade.
@@ -285,41 +280,6 @@ endif()' \
           'filename = boost::filesystem::change_extension(filename, default_ext);' \
           'filename.replace_extension(default_ext);'
 
-      # Оборачиваем линковку NOTFOUND-переменных в if()
-      # CP_TPMS_Gradual: target_link_libraries(''${PROJECT_DLL} ''${CP_TPMS_Gradual})
-      sed -i '/^find_library(CP_TPMS_Gradual cr_tpms_library)$/,/^endif()$/{
-        /^    target_link_libraries(/{
-          s/^    target_link_libraries(/      if(CP_TPMS_Gradual)\n&/
-        }
-      }' src/CMakeLists.txt
-      # Добавляем endif() после endif() блока CR_TPMS
-      sed -i '/^find_library(CP_TPMS_Gradual cr_tpms_library)$/,/^endif()$/{
-        /^endif()$/{ s/^endif()$/endif()\n      endif()/ }
-      }' src/CMakeLists.txt
-
-      # CR_FILLTENSOR: target_link_libraries(libslic3r ''${CP_FILLTENSOR_Gradual})
-      sed -i '/^find_library(CP_FILLTENSOR_Gradual cr_FillTensor_library)$/,/^endif()$/{
-        /^    target_link_libraries(/{
-          s/^    target_link_libraries(/      if(CP_FILLTENSOR_Gradual)\n&/
-        }
-      }' src/CMakeLists.txt
-      # Добавляем закрывающий endif() для вложенного if(CP_FILLTENSOR_Gradual)
-      sed -i '/^find_library(CP_FILLTENSOR_Gradual cr_FillTensor_library)$/,/^endif()$/{
-        /^endif()$/{ s/^endif()$/endif()\n      endif()/ }
-      }' src/CMakeLists.txt
-      # Комментируем безусловные target_link_libraries с NOTFOUND-переменными
-      # (они будут линковаться только если библиотека найдена).
-      substituteInPlace src/CMakeLists.txt \
-        --replace-fail \
-          '    target_link_libraries(''${PROJECT_DLL} ''${CP_TPMS_Gradual})' \
-          '#    target_link_libraries(''${PROJECT_DLL} ''${CP_TPMS_Gradual})' \
-        --replace-fail \
-          'target_link_libraries(data_directory_migrate PRIVATE ''${CP_TPMS_Gradual}' \
-          '#target_link_libraries(data_directory_migrate PRIVATE ''${CP_TPMS_Gradual}' \
-        --replace-fail \
-          '    target_link_libraries(libslic3r ''${CP_FILLTENSOR_Gradual})' \
-          '#    target_link_libraries(libslic3r ''${CP_FILLTENSOR_Gradual})'
-
       # PahoMqttCpp: nixpkgs собирает shared, а не static
       substituteInPlace src/CMakeLists.txt \
         --replace-fail \
@@ -353,6 +313,12 @@ endif()' \
     '';
 
     cmakeFlags = [
+      # version.inc задаёт CREALITYPRINT_VERSION=7.0.0.0 по умолчанию (реальную
+      # версию туда пишет их build-скрипт), из-за чего About показывал 7.0.0.
+      (lib.cmakeFeature "CREALITYPRINT_VERSION" "7.3.0.6157")
+      # Иначе version.inc ставит "Beta": SHIPPING_LEVEL=1, суффикс "Beta" в
+      # About и α-dev ветки в CXCloud/CxAgent. Официальные сборки — Release.
+      (lib.cmakeFeature "PROJECT_VERSION_EXTRA" "Release")
       (lib.cmakeBool "SLIC3R_STATIC" false)
       (lib.cmakeBool "SLIC3R_FHS" true)
       (lib.cmakeFeature "SLIC3R_GTK" "3")
@@ -369,6 +335,12 @@ endif()' \
       (lib.cmakeFeature "LIBNOISE_LIBRARY_RELEASE" "${super.libnoise}/lib/libnoise-static.a")
       # Paho MQTT: указываем где лежат конфиги eclipse-paho-mqtt-c
       (lib.cmakeFeature "eclipse-paho-mqtt-c_DIR" "${super.paho-mqtt-c}/lib/cmake/eclipse-paho-mqtt-c")
+      # Закрытые Creality-библиотеки: в репозитории есть готовые linux/x86_64
+      # архивы (deps/CR_*). Задаём пути кешем — find_library() тогда ничего не
+      # ищет, а CR_KM_RECIPE сам выводит include-каталог из пути к .a.
+      "-DCP_TPMS_Gradual:FILEPATH=${finalAttrs.src}/deps/CR_TPMS/cr_tpms/lib/linux/x86_64/libcr_tpms_library.a"
+      "-DCP_KM_Recipe:FILEPATH=${finalAttrs.src}/deps/CR_KM_RECIPE/cr_km_recipe/lib/linux/x86_64/libcr_km_recipe.a"
+      "-DCP_FILLTENSOR_Gradual:FILEPATH=${finalAttrs.src}/deps/CR_CLOSED/CR_FILLTENSOR/cr_FillTensor/lib/linux/x86_64/libcr_FillTensor_library.a"
       "-Wno-dev"
     ];
 
@@ -384,6 +356,11 @@ endif()' \
         # MetaRTC: заголовки лежат в include/metartc/, а исходники включают их
         # как "yangplayer/...", "yangutil/..." — нужен именно этот каталог.
         "-I${metartc}/include/metartc"
+        # Закрытые Creality-библиотеки: реальные заголовки из deps/ (TPMS,
+        # K-M recipe/цветоделение, FillTensor).
+        "-I${finalAttrs.src}/deps/CR_TPMS/cr_tpms/include"
+        "-I${finalAttrs.src}/deps/CR_KM_RECIPE/cr_km_recipe/include"
+        "-I${finalAttrs.src}/deps/CR_CLOSED/CR_FILLTENSOR/cr_FillTensor/include"
         # gcc-14 сделал incompatible-pointer-types ошибкой; в GUI-коде
         # (boost/cairo) встречаются несовпадения указателей — глобально в warn.
         "-Wno-error=incompatible-pointer-types"
