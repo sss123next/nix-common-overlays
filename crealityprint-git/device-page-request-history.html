@@ -10,9 +10,15 @@
  *
  * Здесь тот же кадр отправляется через ws-proxy сразу после того, как сессия
  * открылась (ProxyWebSocket шлёт {type:"open"} со своим id/socketToken).
+ *
+ * Второй сценарий — удаление записи: страница шлёт {params:{deleteHistory:[...]}}
+ * и очищает выбор, а обновлённый список появляется только когда принтер сам
+ * пришлёт historyList. Перезапрашиваем историю через 1.2/3/6 с, чтобы список
+ * обновлялся сразу после удаления.
  */
 (function () {
   var tries = 0;
+  var lastSession = null;
 
   function install() {
     var bridge = window.wx;
@@ -26,6 +32,7 @@
     var post = bridge.postMessage;
 
     function requestHistory(session) {
+      if (!session) return;
       try {
         // pageToken обязателен и должен лежать внутри payload — иначе
         // parse_proxy_command() в C++ отбросит команду.
@@ -49,8 +56,24 @@
           var msg = JSON.parse(text);
           var p = msg && msg.payload;
           if (p && p.type === "open" && p.socketToken && p.pageToken) {
-            setTimeout(function () { requestHistory(p); }, 300);
-            setTimeout(function () { requestHistory(p); }, 2000);
+            lastSession = {
+              id: p.id,
+              socketToken: p.socketToken,
+              pageToken: p.pageToken
+            };
+            setTimeout(function () { requestHistory(lastSession); }, 300);
+            setTimeout(function () { requestHistory(lastSession); }, 2000);
+          } else if (p && p.type === "send" && typeof p.data === "string" &&
+                     p.data.indexOf('"deleteHistory"') !== -1) {
+            var session = {
+              id: p.id,
+              socketToken: p.socketToken,
+              pageToken: p.pageToken
+            };
+            lastSession = session;
+            setTimeout(function () { requestHistory(session); }, 1200);
+            setTimeout(function () { requestHistory(session); }, 3000);
+            setTimeout(function () { requestHistory(session); }, 6000);
           }
         }
       } catch (e) {}
