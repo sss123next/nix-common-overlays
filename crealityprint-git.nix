@@ -139,6 +139,66 @@ let
       platforms = lib.platforms.linux;
     };
   });
+
+  # Ресурсы из официального релизного AppImage 7.3.0.6157.
+  #
+  # Публичный тег v7.3.0 отстаёт от внутренней ветки, из которой собраны
+  # релизные бинарники: в AppImage лежат более свежие profiles/ (новые принтеры
+  # Creality mBox и SPARKX i8, ~500 обновлённых пресетов, нормализован регистр
+  # имён файлов — на Linux часть профилей не находилась) и пересобранный web/
+  # (другие бандлы/CSS). C++ при этом тот же: .mo переводов из AppImage
+  # байт-в-байт совпадают с генерируемыми из localization/i18n тега.
+  #
+  # Берём только profiles/ и web/; i18n собирается из .po в postPatch.
+  releaseResources = super.stdenv.mkDerivation {
+    pname = "crealityprint-release-resources";
+    version = "7.3.0.6157";
+
+    nativeBuildInputs = [
+      super.cacert
+      super.curl
+      super.gnugrep
+      super.squashfsTools
+    ];
+
+    # FOD: скачиваем AppImage и распаковываем дописанный squashfs-образ.
+    outputHashMode = "recursive";
+    outputHashAlgo = "sha256";
+    outputHash = "sha256-qcfGs12x9XAvb86donG1rBNDesg9anzwYux1Tn4JkcY=";
+
+    buildCommand = ''
+      set -eu
+      export SSL_CERT_FILE=${super.cacert}/etc/ssl/certs/ca-bundle.crt
+
+      curl -sSL -o app.AppImage \
+        "https://github.com/CrealityOfficial/CrealityPrint/releases/download/v7.3.0/CrealityPrint-V7.3.0.6157-x86_64-Release.AppImage"
+
+      # Суперблок squashfs дописан к ELF-рантайму AppImage: перебираем все
+      # вхождения магии «hsqs», валидным окажется одно.
+      offset=""
+      for off in $(grep -abo hsqs app.AppImage | cut -d: -f1); do
+        if unsquashfs -o "$off" -s app.AppImage >/dev/null 2>&1; then
+          offset="$off"
+        fi
+      done
+      if [ -z "$offset" ]; then
+        echo "squashfs superblock not found in AppImage" >&2
+        exit 1
+      fi
+
+      unsquashfs -o "$offset" -d unpacked app.AppImage resources/profiles resources/web
+
+      mkdir -p "$out"
+      cp -r unpacked/resources/profiles "$out/profiles"
+      cp -r unpacked/resources/web "$out/web"
+    '';
+
+    meta = {
+      description = "CrealityPrint 7.3.0.6157 release assets (printer profiles, web UI)";
+      license = lib.licenses.agpl3Only;
+      platforms = lib.platforms.linux;
+    };
+  };
 in
 {
   # MetaRTC экспонируем отдельно — чтобы собирать/тестировать независимо
@@ -163,6 +223,7 @@ in
 
     nativeBuildInputs = [
       super.cmake
+      super.gettext
       super.pkg-config
       super.wrapGAppsHook3
       wxGTK'
@@ -310,6 +371,23 @@ endif()' \
         --replace-fail \
           '        oss << digest[i];' \
           '        oss << static_cast<unsigned int>((uint32_t(digest[i * 4]) << 24) | (uint32_t(digest[i * 4 + 1]) << 16) | (uint32_t(digest[i * 4 + 2]) << 8) | uint32_t(digest[i * 4 + 3]));'
+
+      # --- релизные resources (см. releaseResources) ---
+      # Профили принтеров/филаментов и web-frontend из официальной сборки новее
+      # публичного тега: кладём поверх исходных (одноимённые файлы заменяются,
+      # уникальные для тега остаются).
+      cp -rf ${releaseResources}/profiles/. resources/profiles/
+      cp -rf ${releaseResources}/web/. resources/web/
+
+      # --- переводы, как ./run_gettext.sh в официальной сборке ---
+      # wx ищет resources/i18n/<lang>/CrealityPrint.mo; без него диалоги
+      # остаются на английском (msgid) при русском web-UI.
+      for po in localization/i18n/*/CrealityPrint_*.po; do
+        lang="$(basename "''${po%.po}")"
+        lang="''${lang#*_}"
+        mkdir -p "resources/i18n/$lang"
+        msgfmt --check-format -o "resources/i18n/$lang/CrealityPrint.mo" "$po"
+      done
     '';
 
     cmakeFlags = [
@@ -395,8 +473,6 @@ endif()' \
         "-lwebkit2gtk-4.1"
       ];
     };
-
-    # Generate translation files (скрипта run_gettext.sh в CrealityPrint нет)
 
     preFixup = ''
       gappsWrapperArgs+=(
