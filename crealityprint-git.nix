@@ -289,6 +289,10 @@ in
     patches = [
       # OpenVDB: убираем поиск IlmBase (в nixpkgs он часть OpenEXR/Imath)
       ./orca-slicer-git/no-ilmbase.patch
+      # Device-page (print_manage) frontend asks C++ for get_lang/is_dark_theme
+      # on mount, but PrinterMgrView never answered → vue-i18n stayed en_GB.
+      # Плюс диагностика ws-proxy: без неё «молчащее» удаление не отладить.
+      ./crealityprint-git/device-page-lang-and-wsproxy-debug.patch
       # (Закрытые Creality-библиотеки CR_TPMS/CR_KM_RECIPE/CR_FILLTENSOR не
       # патчим: в репозитории лежат готовые linux/x86_64-архивы, см. cmakeFlags
       # и NIX_CFLAGS_COMPILE. PahoMqttCpp: nixpkgs собирает shared, а не
@@ -378,6 +382,14 @@ endif()' \
       # уникальные для тега остаются).
       cp -rf ${releaseResources}/profiles/. resources/profiles/
       cp -rf ${releaseResources}/web/. resources/web/
+
+      # Диагностика device-страницы: JS-ошибки и обмен с ws-proxy уходят в
+      # C++ (frontend_log → лог приложения). Временно, до разбора «молчащего»
+      # удаления из истории.
+      cat ${./crealityprint-git/device-page-diagnostics.html} >> resources/web/deviceMgr/index.html
+      # Обход гонки: запрос истории уходит до того, как появился printer-клиент,
+      # и больше не повторяется — см. комментарий в файле.
+      cat ${./crealityprint-git/device-page-request-history.html} >> resources/web/deviceMgr/index.html
 
       # --- переводы, как ./run_gettext.sh в официальной сборке ---
       # wx ищет resources/i18n/<lang>/CrealityPrint.mo; без него диалоги

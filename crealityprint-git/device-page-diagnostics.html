@@ -1,0 +1,41 @@
+<script>
+(function () {
+  if (window.__cpDiag) return;
+  window.__cpDiag = 1;
+  var busy = false;
+  function L(kind, value) {
+    if (busy) return;
+    busy = true;
+    try {
+      if (window.wx && window.wx.postMessage)
+        window.wx.postMessage(JSON.stringify({
+          command: "frontend_log",
+          data: kind + " :: " + String(value).slice(0, 4000)
+        }));
+    } catch (e) {}
+    busy = false;
+  }
+  window.addEventListener("error", function (e) {
+    L("js-error", (e.message || "") + " @" + (e.filename || "") + ":" + (e.lineno || 0) + ":" + (e.colno || 0));
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e.reason;
+    L("js-reject", (r && (r.stack || r.message)) || r);
+  });
+  var consoleError = console.error;
+  console.error = function () {
+    L("console-error", Array.prototype.join.call(arguments, " "));
+    return consoleError.apply(console, arguments);
+  };
+  var originPost = window.wx && window.wx.postMessage;
+  if (originPost) {
+    window.wx.postMessage = function (payload) {
+      try {
+        if (String(payload).indexOf('"command":"ws_proxy"') !== -1) L("wx", payload);
+      } catch (e) {}
+      return originPost.apply(window.wx, arguments);
+    };
+  }
+  L("diag", "installed lang=" + navigator.language + " origin=" + location.origin);
+})();
+</script>

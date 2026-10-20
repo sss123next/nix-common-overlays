@@ -1,0 +1,69 @@
+--- a/src/slic3r/GUI/print_manage/App/PrinterMgrView.cpp
++++ b/src/slic3r/GUI/print_manage/App/PrinterMgrView.cpp
+@@ -357,6 +357,30 @@
+     RegisterHandler("set_user_custom_color_list", [this](const nlohmann::json& json_data) {
+         this->handle_set_user_custom_color_list(json_data);
+     });
++
++    // Device page never got these two: the frontend asks for them on mount
++    // (window.wx.postMessage({command:"get_lang"} / "is_dark_theme")), but only
++    // SendToPrinter/SysRoutes handled them. Without get_lang vue-i18n keeps its
++    // default en_GB locale, so every device-page string (including the delete
++    // confirmation dialog) stays English regardless of the app language.
++    RegisterHandler("get_lang", [this](const nlohmann::json&) {
++        nlohmann::json commandJson;
++        commandJson["command"] = "get_lang";
++        commandJson["data"]    = wxGetApp().current_frontend_language_code().ToStdString();
++        run_script(wxString::Format("window.handleStudioCmd('%s');", commandJson.dump().c_str()).ToStdString());
++    });
++
++    RegisterHandler("is_dark_theme", [this](const nlohmann::json&) {
++        nlohmann::json commandJson;
++        commandJson["command"] = "is_dark_theme";
++        commandJson["data"]    = wxGetApp().dark_mode();
++        run_script(wxString::Format("window.handleStudioCmd('%s');", commandJson.dump().c_str()).ToStdString());
++    });
++
++    RegisterHandler("frontend_log", [this](const nlohmann::json& json_data) {
++        BOOST_LOG_TRIVIAL(warning) << "[device-page] " << json_data.value("data", std::string());
++    });
++
+     std::string version = std::string(CREALITYPRINT_VERSION);
+     std::string os = wxGetOsDescription().ToStdString();
+     std::string type = std::string(PROJECT_VERSION_EXTRA);
+--- a/src/slic3r/GUI/print_manage/App/WebSocketProxySession.cpp
++++ b/src/slic3r/GUI/print_manage/App/WebSocketProxySession.cpp
+@@ -1305,6 +1305,9 @@
+         const std::optional<ParsedWsUrl> endpoint = parse_ws_url(command.url);
+         const bool endpoint_allowed = endpoint &&
+             is_device_proxy_endpoint(*endpoint);
++        BOOST_LOG_TRIVIAL(debug) << "[wsproxy] open id=" << command.id
++                                 << " url=" << command.url
++                                 << " allowed=" << endpoint_allowed;
+         if (!endpoint_allowed) {
+             const auto existing_it = sessions.find(command.id);
+             if (existing_it != sessions.end()) {
+@@ -1358,6 +1361,9 @@
+     void HandleSend(const ProxyCommand& command)
+     {
+         const SessionPtr session = FindCurrentSession(command);
++        BOOST_LOG_TRIVIAL(debug) << "[wsproxy] send id=" << command.id
++                                 << " session=" << (session ? "found" : "missing")
++                                 << " bytes=" << command.data.size();
+         if (session)
+             session->EnqueueText(command.data);
+     }
+@@ -1398,6 +1404,13 @@
+         if (it == sessions.end() || it->second.get() != source.get())
+             return;
+ 
++        if (event.event != "message")
++            BOOST_LOG_TRIVIAL(debug) << "[wsproxy] event " << event.event
++                                     << " id=" << event.id;
++        if (event.event == "message" && event.data.find("istor") != std::string::npos)
++            BOOST_LOG_TRIVIAL(debug) << "[wsproxy] in id=" << event.id
++                                     << " " << event.data.substr(0, 800);
++
+         if (event.event == "message" && source->is_device_connection()) {
+             const DeviceIdentity source_device{source->host(), {}};
+             DeviceMessageFilterResult filter_result = FilterDeviceMessage(

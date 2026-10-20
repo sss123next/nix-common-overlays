@@ -1,0 +1,63 @@
+<script>
+/*
+ * Обход гонки на device-странице: компонент истории посылает принтеру
+ *   {method:"get",params:{reqHistory:1}}
+ * ровно один раз — в onMounted, под проверкой
+ *   dataCenter.getPrinter(addr) != null && .socket
+ * Но dataCenter наполняется из ответа C++ на get_machine_list, который приходит
+ * уже после монтирования. На первом заходе проверка не проходит, запрос не
+ * уходит и повтора нет — история пуста до повторного входа на страницу.
+ *
+ * Здесь тот же кадр отправляется через ws-proxy сразу после того, как сессия
+ * открылась (ProxyWebSocket шлёт {type:"open"} со своим id/socketToken).
+ */
+(function () {
+  var tries = 0;
+
+  function install() {
+    var bridge = window.wx;
+    if (!bridge || !bridge.postMessage) {
+      if (++tries < 50) setTimeout(install, 200);
+      return;
+    }
+    if (bridge.__cpReqHistory) return;
+    bridge.__cpReqHistory = true;
+
+    var post = bridge.postMessage;
+
+    function requestHistory(session) {
+      try {
+        // pageToken обязателен и должен лежать внутри payload — иначе
+        // parse_proxy_command() в C++ отбросит команду.
+        post.call(bridge, JSON.stringify({
+          command: "ws_proxy",
+          payload: {
+            type: "send",
+            pageToken: session.pageToken,
+            id: session.id,
+            socketToken: session.socketToken,
+            data: JSON.stringify({ method: "get", params: { reqHistory: 1 } })
+          }
+        }));
+      } catch (e) {}
+    }
+
+    bridge.postMessage = function (payload) {
+      try {
+        var text = String(payload);
+        if (text.indexOf('"command":"ws_proxy"') !== -1) {
+          var msg = JSON.parse(text);
+          var p = msg && msg.payload;
+          if (p && p.type === "open" && p.socketToken && p.pageToken) {
+            setTimeout(function () { requestHistory(p); }, 300);
+            setTimeout(function () { requestHistory(p); }, 2000);
+          }
+        }
+      } catch (e) {}
+      return post.apply(bridge, arguments);
+    };
+  }
+
+  install();
+})();
+</script>
