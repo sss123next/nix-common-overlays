@@ -100,9 +100,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "102357e9e33e8a5c429467bd7da997cd534d723c";
+        rev = "fa788e6320337cbf23d1864e044389342d406a3d";
 #        ref = "production";
-        hash = "sha256-25ftzOqumpoCu8lg+eTOZbCNC/wmbGTPRqlkabmzCtU=";
+        hash = "sha256-2c/RXcqsiY6sWeiTZpHAIU7qSA8O1b23l3kQeAf8n3A=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
