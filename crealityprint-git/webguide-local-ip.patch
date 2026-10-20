@@ -1,0 +1,26 @@
+--- a/src/slic3r/GUI/WebGuideDialog.cpp
++++ b/src/slic3r/GUI/WebGuideDialog.cpp
+@@ -329,10 +329,10 @@
+             const int port = wxGetApp().get_server_port();
+             if (startpage == BBL_FILAMENT_ONLY) {
+                 TargetUrl = wxString::Format(
+-                    "http://localhost:%d/homepage/index.html?lang=%s&isScale=false#/Guide/createFilament", port, strlang);
++                    "http://127.0.0.1:%d/homepage/index.html?lang=%s&isScale=false#/Guide/createFilament", port, strlang);
+             } else {
+                 TargetUrl = wxString::Format(
+-                    "http://localhost:%d/homepage/index.html?lang=%s&isScale=false&customized=%d&customer_name=%s#/Guide/addPrinter", port, strlang,
++                    "http://127.0.0.1:%d/homepage/index.html?lang=%s&isScale=false&customized=%d&customer_name=%s#/Guide/addPrinter", port, strlang,
+                     customized, customer_name);
+             }
+         } else {
+--- a/src/slic3r/GUI/PrinterCoverRoute.hpp
++++ b/src/slic3r/GUI/PrinterCoverRoute.hpp
+@@ -38,7 +38,7 @@
+ 
+ inline std::string printer_cover_url(int port, const std::string& vendor, const std::string& model)
+ {
+-    return "http://localhost:" + std::to_string(port) + "/printer-cover/" +
++    return "http://127.0.0.1:" + std::to_string(port) + "/printer-cover/" +
+            printer_cover_hex(vendor) + "/" + printer_cover_hex(model);
+ }
+ 

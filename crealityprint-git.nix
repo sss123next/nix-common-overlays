@@ -293,6 +293,10 @@ in
       # on mount, but PrinterMgrView never answered → vue-i18n stayed en_GB.
       # Плюс диагностика ws-proxy: без неё «молчащее» удаление не отладить.
       ./crealityprint-git/device-page-lang-and-wsproxy-debug.patch
+      # HTTP-сервер слушает только 127.0.0.1, а GuideFrame грузил
+      # http://localhost:<port>/ — на машинах, где localhost уходит в ::1,
+      # страница мастера не загружалась вовсе (пустое окно).
+      ./crealityprint-git/webguide-local-ip.patch
       # (Закрытые Creality-библиотеки CR_TPMS/CR_KM_RECIPE/CR_FILLTENSOR не
       # патчим: в репозитории лежат готовые linux/x86_64-архивы, см. cmakeFlags
       # и NIX_CFLAGS_COMPILE. PahoMqttCpp: nixpkgs собирает shared, а не
