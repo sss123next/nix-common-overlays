@@ -7,6 +7,8 @@ let
   # webkit/EGL/private fonts + libsecret + без debug-диалогов.
   # Выражение идентично orca-slicer-git.nix, поэтому обе сборки
   # дают одну и ту же замену wx (кэш nix общий).
+  # Версия прибита к 3.3.3.1: в 3.3.4 у wxGridCellChoiceEditor убран
+  # OnComboCloseUp (используется в GUI_ObjectTable.cpp), сборка падает.
   wxGTK' =
     (super.wxwidgets_3_3.override {
       withPrivateFonts = true;
@@ -14,6 +16,14 @@ let
       withEGL = true;
     }).overrideAttrs
       (old: {
+        version = "3.3.3.1";
+        src = super.fetchFromGitHub {
+          owner = "wxWidgets";
+          repo = "wxWidgets";
+          tag = "v3.3.3.1";
+          fetchSubmodules = true;
+          hash = "sha256-gB+mEk8rHpB4z1m8RWJSV+upKzLt7pZtlviS2g03EHY=";
+        };
         buildInputs = old.buildInputs ++ [ super.libsecret ];
         configureFlags = old.configureFlags ++ [
           "--enable-debug=no"
