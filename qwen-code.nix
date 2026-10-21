@@ -4,17 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      # No newer release tag yet (package.json on main is still 0.24.6); pinned to
-      # the last main commit instead, upstream version embedded by the build is 0.24.6.
-      version = "0.25.2-unstable-2026-10-17";
+      version = "0.25.3-unstable-2026-10-21";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-17, "test(managed-agent): pin #14387's Turn-row accessors in the lock canary (#14501)"
-        # tag = "v${version}"; hash = "sha256-xuoaHtMa8FU2imFlhSkWZX0Z0HvdWq13+PtkHkntvOU=";  # v0.24.6
-        rev = "94f37e86ccda726b8fd9f922b640c8adbaeac3bb";
-        hash = "sha256-VUnhoW92vncy7D88bO9FDBlKE1vopV0vvbRdrtXGZhU=";
+        # main @ 2026-10-21, "feat(cli): paste clipboard text with Ctrl+V on Linux (#14172)"
+        rev = "39228ac51e2bd2dda36bffa9e4fbc416796c9f88";
+        hash = "sha256-pIFojlnvT2z1ELnF1q6oAnS13oko+CGCmet8M1JRSuE=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -43,7 +40,7 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-6mzPUw8TMvZe72qSgiFXTJZB3ECEjw0b8HEVrPLVQt4=";
+        hash = "sha256-0tjZX/YHu5gs9eUxYIpCv18iKlNMveL8wRCV1nfQSCY=";
       };
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
@@ -75,7 +72,8 @@ self: super: {
 
         pnpm -r --filter "{./packages/cli}..." \
              --filter "@qwen-code/node-repl-mcp" \
-             --filter "@qwen-code/channel-plugin-example" run build
+             --filter "@qwen-code/channel-plugin-example" \
+             --filter "@qwen-code/generated-ui" run build
 
         # The settings-schema step of "pnpm generate".
         node --import tsx/esm scripts/generate-settings-schema.ts
