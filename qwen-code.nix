@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.25.3-unstable-2026-10-21";
+      version = "0.25.3-unstable-2026-10-22";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-21, "feat(cli): paste clipboard text with Ctrl+V on Linux (#14172)"
-        rev = "39228ac51e2bd2dda36bffa9e4fbc416796c9f88";
-        hash = "sha256-pIFojlnvT2z1ELnF1q6oAnS13oko+CGCmet8M1JRSuE=";
+        # main @ 2026-10-22, "test(cli): canonicalize the review git fixture so R32-2 holds under a symlinked tmpdir (#15133)"
+        rev = "8a9ae631a3f396f76e166c341a896e300d843e4c";
+        hash = "sha256-JQegpcyZadNmR505wVMEESDYrKArzp4YUp8+4oBQUf0=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
