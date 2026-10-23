@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-J5QdvjQwQUUrECH4QXT2Wj/3Tdm8ErD7zB9z9oFUXkw=";
+            "x86_64-linux"   = "sha256-42dkBKWYOUoFNzEOi0GlQFsttTDkV04tCR3E7A32H6M=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -92,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.1.3";
+      version = "2.1.4";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -100,9 +100,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "ad5336e63656d8145ab9f6c350f1ab3f96928cdd";
+        rev = "f9f463be78312411618964a171c285c316d4b9fc";
 #        ref = "production";
-        hash = "sha256-FyUXyXcyE3behQEAWOYZvIhuTKplxXHHl4QaBZ6Si3c=";
+        hash = "sha256-07/PGq/YDmHN6r6JXrNjFSJvfA4KAgVbzjRJmNlnywQ=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
