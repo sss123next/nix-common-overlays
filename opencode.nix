@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-/TJrgfjavDuBerdQ4t8CTlr3cdvlm6fz1wCiwczA6bI=";
+            "x86_64-linux"   = "sha256-J5QdvjQwQUUrECH4QXT2Wj/3Tdm8ErD7zB9z9oFUXkw=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -92,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.0.32";
+      version = "2.1.3";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -100,9 +100,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "fa788e6320337cbf23d1864e044389342d406a3d";
+        rev = "ad5336e63656d8145ab9f6c350f1ab3f96928cdd";
 #        ref = "production";
-        hash = "sha256-2c/RXcqsiY6sWeiTZpHAIU7qSA8O1b23l3kQeAf8n3A=";
+        hash = "sha256-FyUXyXcyE3behQEAWOYZvIhuTKplxXHHl4QaBZ6Si3c=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
@@ -116,9 +116,11 @@ self: super: {
         # Bun's fetch enforces a default five-minute deadline on every request; this wraps
         # HttpClient so native requests opt out. Bump-dependent: must apply cleanly to src rev.
         ./patches/opencode-native-fetch-timeout.patch
-        # Raise the session retry budget from 10 attempts (~84s) to 65535 by default so
-        # transient provider failures (e.g. HTTP 500) keep retrying for days instead of
-        # failing the step. Override at runtime with OPENCODE_RETRY_ATTEMPTS. Applies at offset 0.
+        # Raise the model retry budget from 10 attempts (~84s) to 65535 by default so transient
+        # provider failures (e.g. HTTP 500) keep retrying for days instead of failing the step, and
+        # lift the timeout-retry cap of 3 to the same budget. Override at runtime with
+        # OPENCODE_RETRY_ATTEMPTS / OPENCODE_TIMEOUT_RETRIES. In v2.1.x the schedule moved out of
+        # session/runner/retry.ts into core/src/model-retry.ts; rebased there, applies at offset 0.
         ./patches/opencode-retry-attempts.patch
         # Web GUI: stop generation on Ctrl+G only. Bare Escape still closes popovers and
         # cancels queue editing, but no longer aborts a running turn (interaction.ts). Offset 0.
