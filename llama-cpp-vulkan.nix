@@ -13,14 +13,14 @@ self: super: {
       src = fetchFromGitHub {
         owner = "ggml-org";
         repo = "llama.cpp";
-        rev = "f5027fb21307eb264aed483242603d68c87b0fe3";
-        hash = "sha256-XhTdMC37OU0SlyVFI9hECAvndGxafqJ5V0lRI8nJdUs=";
+        rev = "1a24df163920a4744a95373d178d790b72a9bb2f";
+        hash = "sha256-VQ0o3g2ytXApbNIOgWV1J5mguHQesAqcNHdthLU4yzo=";
       };
 
       # Реквизиты для build-info (в tarball'е .git нет → git-ветка не сработает):
-      # 11836 = rev-list --count master на момент пина srcRev.
-      buildNumber = "11836";
-      buildCommit = "f5027fb";
+      # 11846 = rev-list --count master на момент пина srcRev.
+      buildNumber = "11846";
+      buildCommit = "1a24df1";
 
       # -march=native не использовать: сборка идёт на удалённых билдерах,
       # целевая машина неизвестна. В Nix SOURCE_DATE_EPOCH задан, поэтому
