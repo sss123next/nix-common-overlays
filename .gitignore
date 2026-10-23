@@ -1,0 +1,13 @@
+# results и локальный мусор
+result
+result-*
+*.log
+*.bak
+kb.db
+result.json
+dump/
+.dump
+.opencode/
+.playwright-mcp/
+.qwen/
+.*.bak
