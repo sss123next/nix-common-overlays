@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.25.3-unstable-2026-10-22";
+      version = "0.26.0-unstable-2026-10-23";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-22, "test(cli): canonicalize the review git fixture so R32-2 holds under a symlinked tmpdir (#15133)"
-        rev = "8a9ae631a3f396f76e166c341a896e300d843e4c";
-        hash = "sha256-JQegpcyZadNmR505wVMEESDYrKArzp4YUp8+4oBQUf0=";
+        # main @ 2026-10-23, "fix(core): bind session PRs when gh is outside PATH (#15212)"
+        rev = "b58875e4c0866217feb0de39ce35ecb4e4269904";
+        hash = "sha256-cZ+4BICx+DFSO9g0/bOoyYq65NbLqacr6C7m6MBy4G8=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
