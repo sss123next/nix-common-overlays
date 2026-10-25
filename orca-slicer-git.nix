@@ -4,6 +4,10 @@ let
   inherit (super) lib clangStdenv;
 
   # wx должен совпадать с wxinspector.nix (иначе в одной ссылке два wx).
+  # Версия прибита к 3.3.3.1 (как в crealityprint-git.nix): в 3.3.4 у
+  # wxGridCellChoiceEditor вместо OnComboCloseUp объявлен DismissEditor, но
+  # определения в libwx_gtk3u_core нет → «undefined reference» на линковке
+  # (поэтому вариант nixpkgs 4361ae4eb с substituteInPlace сюда не подходит).
   wxGTK' =
     (super.wxwidgets_3_3.override {
       withPrivateFonts = true;
@@ -11,6 +15,14 @@ let
       withEGL = true;
     }).overrideAttrs
       (old: {
+        version = "3.3.3.1";
+        src = super.fetchFromGitHub {
+          owner = "wxWidgets";
+          repo = "wxWidgets";
+          tag = "v3.3.3.1";
+          fetchSubmodules = true;
+          hash = "sha256-gB+mEk8rHpB4z1m8RWJSV+upKzLt7pZtlviS2g03EHY=";
+        };
         buildInputs = old.buildInputs ++ [ super.libsecret ];
         configureFlags = old.configureFlags ++ [
           # Disable noisy debug dialogs
@@ -160,6 +172,10 @@ in
           -e 's|<libnoise/module/modulebase.h>|<noise/module/modulebase.h>|' \
           -e 's|"libnoise/noise.h"|"noise/noise.h"|' \
           src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp
+
+        # GUI_ObjectTable.cpp вызывает wxGridCellChoiceEditor::OnComboCloseUp —
+        # он есть только в wx <= 3.3.3.1, поэтому wx прибита выше (см. wxGTK'),
+        # а не патчится на DismissEditor(), как делает nixpkgs для 3.3.4.
       '';
     
       cmakeFlags = [

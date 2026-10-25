@@ -44,8 +44,33 @@ final: prev: rec {
           doInstallCheck = false; # Disable install checks
           checkPhase = "";
         });
+      pyopenssl =
+        with python-prev;
+        pyopenssl.overridePythonAttrs (old: rec {
+          # TestConnection.test_moving_buffer_behavior — тест на тайминги буфера: под
+          # нагрузкой параллельной сборки вместо BAD_WRITE_RETRY прилетает WantWriteError
+          # («assert None in ('bad write retry', 'BAD_WRITE_RETRY')»), и падает весь
+          # buildEnv через service-identity → trustme/trio/websockets → yt-dlp.
+          # В isolation проходит, --reruns 3 не спасает (4/4 падают в нагруженном билдере).
+          disabledTests = (old.disabledTests or [ ]) ++ [
+            "test_moving_buffer_behavior"
+          ];
+        });
     };
   };
+
+  # Sphinx >=9 не кладёт _static/jquery.js в man-билдер, а nixpkgs делает там rm без -f
+  # (fa7eda094267), и installSphinxPhase падает: «rm: cannot remove
+  # '.sphinx/man/man/_static/jquery.js'». Upstream починил только 2e3c26853 (2026-10-21)
+  # через склейку sphinxBuilders; здесь — просто толерантный rm.
+  todoman = prev.todoman.overrideAttrs (old: rec {
+    preInstallSphinx = ''
+      rm -f .sphinx/man/man/_static/jquery.js \
+            .sphinx/man/man/_static/_sphinx_javascript_frameworks_compat.js
+      rmdir .sphinx/man/man/_static/ 2>/dev/null || true
+    '';
+  });
+
   pythonPackages = python3.pkgs;
   python3Packages = python3.pkgs;
 }
