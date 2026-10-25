@@ -37,6 +37,22 @@ self: super: {
         url = "https://nodejs.org/dist/v${officialNodeVersion}/node-v${officialNodeVersion}-${officialNodeDist.os}-${officialNodeDist.arch}.tar.xz";
         hash = officialNodeDist.hash;
       };
+
+      # RPATH в этот бинарь писать нельзя: patchelf 0.19.x при добавлении DT_RUNPATH
+      # переписывает заголовки так, что node умирает с SIGSEGV ещё до main (замерено на
+      # v24.20.0: 0.15.0 interp+rpath — живой; 0.19.2 только interp — живой; 0.19.2
+      # interp+rpath — exit 139, и даже через ld.so напрямую не оживает). Поэтому
+      # ставим лишь интерпретатор, а libstdc++/glibc добираем через LD_LIBRARY_PATH:
+      # настоящий бинарь уезжает в libexec, на его месте — обёртка (её же видит PATH
+      # детей и «#!/usr/bin/env node» у npm/npx из этого дерева).
+      officialNodeFix = lib.optionalString stdenv.hostPlatform.isLinux ''
+        mkdir -p $out/lib/official-node/libexec
+        mv $out/lib/official-node/bin/node $out/lib/official-node/libexec/node-real
+        patchelf --set-interpreter ${stdenv.cc.bintools.dynamicLinker} \
+          $out/lib/official-node/libexec/node-real
+        makeWrapper $out/lib/official-node/libexec/node-real $out/lib/official-node/bin/node \
+          --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath [ stdenv.cc.cc.lib glibc ]}"
+      '';
     in
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "deepseek-harness";
@@ -62,9 +78,10 @@ self: super: {
         makeBinaryWrapper
         xz
       ]
-      # autoPatchelf fixes only the official node below (see dontAutoPatchelf);
-      # the workspace tree already runs as-is and must not be rewritten.
-      ++ lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ];
+      # patchelf нужен напрямую (officialNodeFix): RPATH в бандл не пишем, поэтому
+      # autoPatchelf для него не вызываем; хук оставлен ради dontAutoPatchelf — дерево
+      # воркспейса и остальные ELF должны остаться как есть.
+      ++ lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook patchelf ];
 
       buildInputs = lib.optionals stdenv.hostPlatform.isLinux [
         # libstdc++ for the official node's rpath (it links libstdc++.so.6
@@ -153,12 +170,12 @@ self: super: {
           exit 1
         fi
 
-        # The official nodejs.org runtime (see officialNode): fix its ELF bits
-        # (interpreter/rpath — the tarball ships /lib64 ld and no store rpath).
-        # Patched here rather than in fixup so installCheck can run it.
+        # The official nodejs.org runtime (see officialNode): чиним только ELF-биты
+        # интерпретатора, RPATH не пишем (см. officialNodeFix). Патчим здесь, а не в
+        # fixup, чтобы installCheck мог его запустить.
         mkdir -p $out/lib/official-node
         tar -xJf ${officialNode} --strip-components=1 -C $out/lib/official-node
-        ${lib.optionalString stdenv.hostPlatform.isLinux "autoPatchelf -- $out/lib/official-node/bin/node"}
+        ${officialNodeFix}
 
         # The launcher entry (apps/cli) is a plain ESM script whose entry guard
         # is `import.meta.main` — needs Node >= 22.19/24 (see upstream engines;
