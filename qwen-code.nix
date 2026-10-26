@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.26.1-unstable-2026-10-25";
+      version = "0.26.1-unstable-2026-10-26";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-25, "docs: clarify usage statistics across authentication methods (#15554)"
-        rev = "338f13366c1d86e586f7e0785942740da3503887";
-        hash = "sha256-1gq7T2QLIxTDgT7v192PsnqrZnlwoRjIIYMcjM4WkHE=";
+        # main @ 2026-10-26, "feat(verify-pr): add a local preflight and a verdict check (#15614)"
+        rev = "2f3d1b2ff53b6ae45bc022d1ff415e679d944015";
+        sha256 = "5080a9a9685d132be425c280f624ea147371270c1000f9eb485ca5f5eddc7153";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
