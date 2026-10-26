@@ -53,13 +53,13 @@ in
       pname = "orca-slicer-git";
       # Версия из version.inc (SoftFever_VERSION), git-суффикс пинится здесь:
       # find_package(Git) в main больше не используется.
-      version = "2.5.0-dev-unstable-2026-10-15";
+      version = "2.5.0-dev-unstable-2026-10-26";
     
       src = super.fetchFromGitHub {
         owner = "OrcaSlicer";
         repo = "OrcaSlicer";
-        rev = "b75af485ce18225eb338a79ab81333579579e9b8";
-        hash = "sha256-4nLXGr8GHH4Zz5b6z4regg/8Kq0ylYRdFsR6BMvRjKQ=";
+        rev = "63048e38587eb1e5ea3f05d0853a93976f58fd8a";
+        hash = "sha256-c9nVYL08JSZnfGtfQGI7dKiGeTU+dQCmTEXBN89kgKw=";
       };
     
       __structuredAttrs = true;
@@ -129,9 +129,6 @@ in
     
       # Исправления, которые upstream ещё не слил / специфичны для nix.
       patches = [
-        # Boost 1.86: v1 — inline namespace; fwd-decl namespace boost::process { class child; }
-        # конфликтует с boost::process::v1::child. <boost/process.hpp> уже включён.
-        ./orca-slicer-git/remove-fwd-decl-child.patch
         # opencv_world у nixpkgs не собирается — линкуем конкретные модули.
         ./orca-slicer-git/dont-link-opencv-world.patch
         # Не копируем «bundled» libpython из несуществующего deps-префикса:
