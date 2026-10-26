@@ -71,6 +71,22 @@ final: prev: rec {
     '';
   });
 
+  # GDAL fork-тест фейлится на удалённом билдере в изолированном окружении:
+  #   test_gdalalg_raster_tile_fork_forced — «Fork failed»
+  gdal = prev.gdal.overrideAttrs (old: {
+    disabledTests = (old.disabledTests or []) ++ [
+      "test_gdalalg_raster_tile_fork_forced"
+    ];
+  });
+  gdalMinimal = prev.gdalMinimal.overrideAttrs (old: {
+    disabledTests = (old.disabledTests or []) ++ [
+      "test_gdalalg_raster_tile_fork_forced"
+    ];
+    # Вариант B — если disabledTests не работает, полное отключение тестов:
+    # doInstallCheck = false;
+    # doCheck = false;
+  });
+
   pythonPackages = python3.pkgs;
   python3Packages = python3.pkgs;
 }
