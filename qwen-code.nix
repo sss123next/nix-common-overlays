@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.26.1-unstable-2026-10-24";
+      version = "0.26.1-unstable-2026-10-25";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-24, "feat(cli): preserve OpenTUI session replay and rewind (#15384)"
-        rev = "b44e033315d9873818d798a4eea3b645e9070cac";
-        hash = "sha256-cqEfskVSuUXfszIIO9j1AhyaKULMUiIhjM4dq/N4Pog=";
+        # main @ 2026-10-25, "docs: clarify usage statistics across authentication methods (#15554)"
+        rev = "338f13366c1d86e586f7e0785942740da3503887";
+        hash = "sha256-1gq7T2QLIxTDgT7v192PsnqrZnlwoRjIIYMcjM4WkHE=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
