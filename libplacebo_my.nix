@@ -7,7 +7,7 @@ self: super: {
       src = fetchGit {
         url = "https://code.videolan.org/videolan/libplacebo";
         ref = "master";
-        rev = "3330a515d62139259c26239014f286e233bd3a5c";
+        rev = "275f7dea27924cdd34ab2e6c20e448b6bc4fab65";
       };
       nativeBuildInputs = old.nativeBuildInputs ++ [ xxHash ];
       patches = [];
