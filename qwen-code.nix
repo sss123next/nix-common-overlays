@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.26.2-unstable-2026-10-28";
+      version = "0.26.3-unstable-2026-10-28";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-28, "fix(ci): pin PR retries to the triggering head SHA (#15734)"
-        rev = "9acb3a5a1d68aad0705ad4d420830affb59cc95a";
-        sha256 = "178d3b9e8a1cc58efe37894ac04d843e497044f2cacfd4996ba39fb67532e55f";
+        # main @ 2026-10-28, "feat(verify-pr): make \"re-verify after update\" a follow-up trigger (#15816)"
+        rev = "ca204559a724a088071ea6fab025aa2efd740021";
+        sha256 = "a0b6ff00faa4ae5bb623652fe2e1452e8fda607518b31243e531e2580dff87a5";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
