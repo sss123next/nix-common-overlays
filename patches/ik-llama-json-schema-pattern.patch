@@ -1,0 +1,37 @@
+diff --git a/common/json-schema-to-grammar.cpp b/common/json-schema-to-grammar.cpp
+index e2c4d6ce..cc76dfa2 100644
+--- a/common/json-schema-to-grammar.cpp
++++ b/common/json-schema-to-grammar.cpp
+@@ -346,11 +346,28 @@ private:
+     }
+
+     std::string _visit_pattern(const std::string & pattern, const std::string & name) {
+-        if (!(pattern.front() == '^' && pattern.back() == '$')) {
+-            _errors.push_back("Pattern must start with '^' and end with '$'");
+-            return "";
++        // JSON Schema pattern is not implicitly anchored (match anywhere).
++        // However, this converter builds a GBNF rule wrapped in "...", so it
++        // must match the entire string.  Strip explicit ^/$ anchors when
++        // present so the inner regex becomes the whole-string grammar.  A
++        // pattern without anchors is used as-is (full-string match, which is
++        // stricter than JSON Schema spec but the safest GBNG fallback).
++        if (pattern.empty()) {
++            return _add_rule(name, "\"\\\"\\\"\" space");
++        }
++        std::string sub_pattern = pattern;
++        if (pattern.size() >= 2 && pattern.front() == '^' && pattern.back() == '$') {
++            sub_pattern = pattern.substr(1, pattern.size() - 2);
++        } else if (pattern.front() == '^') {
++            sub_pattern = pattern.substr(1);
++        } else if (pattern.back() == '$') {
++            sub_pattern = pattern.substr(0, pattern.size() - 1);
++        } else {
++            // Per JSON Schema spec, pattern without anchors matches
++            // anywhere in the string.  For GBNF generation the safest
++            // fallback is full-string match, since we cannot easily
++            // express "contains" in the grammar.
+         }
+-        std::string sub_pattern = pattern.substr(1, pattern.length() - 2);
+         std::unordered_map<std::string, std::string> sub_rule_ids;
+
+         size_t i = 0;
