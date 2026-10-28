@@ -29,7 +29,13 @@ self: super: {
 
         # --print-stats / --no-print-stats / --stats-interval N: тонкий вывод
         # таймингов и периодической статистики пропуска сервером.
-        patches = [ ./patches/ik-llama-stats-interval.patch ./patches/ik-llama-fix-vk-host-buffer.patch  ];
+        # ik-llama-json-schema-pattern: разрешить JSON Schema pattern без ^...$
+        # якорей (opencode падал с kimi code 2.7 при tool calling).
+        patches = [
+          ./patches/ik-llama-stats-interval.patch
+          ./patches/ik-llama-fix-vk-host-buffer.patch
+          ./patches/ik-llama-json-schema-pattern.patch
+        ];
 
         # Базовый уровень инструкций — AVX2. -march=native не использовать:
         # сборка идёт на удалённых билдерах, целевая машина неизвестна.
