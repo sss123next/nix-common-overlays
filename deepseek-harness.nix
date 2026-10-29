@@ -21,14 +21,14 @@ self: super: {
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "deepseek-harness";
       # No stable tags exist yet (all releases are alpha/rc); pinned to the last
-      # master commit instead, upstream version embedded by the build is 0.2.1-alpha.3.
-      version = "0.2.1-rc.2-unstable-2026-10-17";
+      # master commit instead, which is tagged dsh-v0.2.2-alpha.2.
+      version = "0.2.2-alpha.2-unstable-2026-10-28";
 
       src = fetchFromGitHub {
         owner = "deepseek-ai";
         repo = "deepseek-harness";
-        rev = "687f282e8625c6b8d11ff58211a90524be2e4317";
-        hash = "sha256-WcPs3q4NFTRnH2y1Rc/o7/rvJAOe8s7isoTQYf8APFU=";
+        rev = "f3803c96974ad4a94195fb97e5c637e9c2a3afe3";
+        hash = "sha256-KxEyrXuFwEKXney6ngmuEMp1djxPJ0F6duVZgBJ+fI0=";
       };
 
       # packageManager: pnpm@11.28.5 (nixpkgs pnpm_11 lags a bit; tolerated);
@@ -55,14 +55,14 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-C9Aw9AS4r7zubaEuT6mLXQ+AhhMVlTxPZRKTpzRUkcU=";
+        hash = "sha256-ashO+/gZlIz+hoU9o/YSwuqJfiG75ocSMHHZJrXgscg=";
       };
 
       env.NODE_OPTIONS = "--max-old-space-size=4096";
       # fetchFromGitHub provides no .git; client-build-environment.ts reads this
       # public value instead of spawning `git rev-parse HEAD`, and its dirty
       # probe treats a missing git as "no metadata" (no dirty marker).
-      env.DSH_CLIENT_COMMIT_HASH = "687f282e8625c6b8d11ff58211a90524be2e4317";
+      env.DSH_CLIENT_COMMIT_HASH = "f3803c96974ad4a94195fb97e5c637e9c2a3afe3";
 
       # `pnpm run build` (scripts/build.ts) = build:native-system (flock Node-API
       # addon; needs the node headers next to process.execPath) + build:lib (tsc
@@ -135,6 +135,7 @@ self: super: {
         v=$($out/bin/dsh --version)
         echo "dsh --version => $v"
         case "$v" in
+          0.2.2-alpha*) ;;
           0.2.1-rc.2*) ;;
           0.2.1-alpha*) ;;
           *) echo "ERROR: unexpected dsh version: $v" >&2; exit 1 ;;
