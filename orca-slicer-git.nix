@@ -53,13 +53,13 @@ in
       pname = "orca-slicer-git";
       # Версия из version.inc (SoftFever_VERSION), git-суффикс пинится здесь:
       # find_package(Git) в main больше не используется.
-      version = "2.5.0-dev-unstable-2026-10-26";
+      version = "2.5.0-dev-unstable-2026-10-29";
     
       src = super.fetchFromGitHub {
         owner = "OrcaSlicer";
         repo = "OrcaSlicer";
-        rev = "63048e38587eb1e5ea3f05d0853a93976f58fd8a";
-        hash = "sha256-c9nVYL08JSZnfGtfQGI7dKiGeTU+dQCmTEXBN89kgKw=";
+        rev = "3911c9a56e494114b0e59adc79af83cf248e12f6";
+        hash = "sha256-sXWiWzl6Zk6rYzyFarp9MCWhT2ZVk4ZrdjF3Ax9D2IE=";
       };
     
       __structuredAttrs = true;
