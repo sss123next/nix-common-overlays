@@ -7,15 +7,15 @@ self: super: {
       let
         # Пин апстрима: релизных тегов у ik_llama.cpp нет (только стаб t0002),
         # см. research/nix-overlays/git-version-packaging.
-        srcRev = "1c5ea124098890184b297023cd9fc9655451b1ec";
+        srcRev = "06d729c5aff5aad77c408ad97efb2048475414c4";
         # Реквизиты для build-info (в tarball'е .git нет → git-ветка не сработает):
-        # 5144 = rev-list --count main на момент пина srcRev.
-        buildNumber = "5144";
-        buildCommit = "1c5ea124";
+        # 5153 = rev-list --count main на момент пина srcRev.
+        buildNumber = "5153";
+        buildCommit = "06d729c5";
       in
       {
         pname = "ik_llama-cpp-vulkan";
-        version = "unstable-2026-10-30";
+        version = "unstable-2026-12-09";
 
         # fetchGit с ref без rev невозможен в pure-mode (flake eval падает:
         # "in pure evaluation mode, 'fetchGit' doesn't fetch unlocked input"),
