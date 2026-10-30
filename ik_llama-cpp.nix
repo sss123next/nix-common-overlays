@@ -15,7 +15,7 @@ self: super: {
       in
       {
         pname = "ik_llama-cpp";
-        version = "unstable-2026-12-09";
+        version = "unstable-2026-10-30";
 
         # fetchGit с ref без rev невозможен в pure-mode (flake eval падает:
         # "in pure evaluation mode, 'fetchGit' doesn't fetch unlocked input"),
