@@ -1,7 +1,7 @@
 diff --git a/packages/app/src/composer/editor/interaction.ts b/packages/app/src/composer/editor/interaction.ts
 --- a/packages/app/src/composer/editor/interaction.ts
 +++ b/packages/app/src/composer/editor/interaction.ts
-@@ -422,8 +422,11 @@ export function createComposerEditor(input: {
+@@ -450,8 +450,11 @@ export function createComposerEditor(input: {
  
      const stop =
        (input.view.submit.working?.() || input.view.submit.held?.()) &&
