@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-7e6NVZlf+/yEu1TMxvigD0v7tbDcWWBQ7mlDwEWliBg=";
+            "x86_64-linux"   = "sha256-i6yta62BRx1w+aFDteW1c6Gv3wKndV05Zec2SXXicME=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -100,9 +100,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "9bbb8ce18c80f099e0e448775f59d965ead40a21";
+        rev = "8bca5329293a34f4bdd7fdc4f4020be80c1eb477";
 #        ref = "production";
-        hash = "sha256-/a1czcXi12KWPXcESqplNdOZcjEs8gWCMO7w4nQYLkw=";
+        hash = "sha256-Tiaua7tEvI/eVCvmpU10Boa/nmzBrL/XBFlGtBOTqC4=";
       };
 
       # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
@@ -127,6 +127,12 @@ self: super: {
         ./patches/opencode-esc-no-interrupt.patch
       ];
 
+      # NOTE (production 8bca532, post-v2.2.5): the old "splitting: true -> false" workaround for the
+      # bun code-splitting regression (nixpkgs PR #564101) was removed. With bun 1.4.2 forcing
+      # splitting off now yields a bundle that dies at load time with
+      # `ReferenceError: RaL is not defined` (the compiled binary cannot even print shell completions,
+      # which is what installShellCompletion caught). Upstream's splitting:true builds and runs clean;
+      # re-add the substitution only if a future rev reintroduces the regression.
       postPatch =
         # Relax Bun version check to be a warning instead of an error
         ''
@@ -134,11 +140,6 @@ self: super: {
             --replace-fail \
             'throw new Error(`This script requires bun@''${expectedBunVersionRange}' \
             'console.warn(`Warning: This script requires bun@''${expectedBunVersionRange}'
-        ''
-        # Bun 1.4.x regressed compiled executable code splitting (nixpkgs PR #564101).
-        + ''
-          substituteInPlace packages/cli/script/build.ts \
-            --replace-fail 'splitting: true,' 'splitting: false,'
         ''
         # schema.ts imports prettier solely to pretty-print the generated JSON. Prettier is a root
         # workspace devDependency and our FOD install excludes the root (--filter '!./', like
