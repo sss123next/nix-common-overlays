@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.26.4-unstable-2026-10-29";
+      version = "0.26.5-unstable-2026-11-02";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-10-29, "fix(release): reduce hosted runner queue delays (#15832)"
-        rev = "70be140e148f8fc7527cc51717603a6dd84abc19";
-        sha256 = "a872abb3869a76c17de7167aac4b9bcfb3fbf799e327d658e98ea466c55e922c";
+        # main @ 2026-11-02, "test(managed-agent): gate detach while a tool result is unknown (#16098)"
+        rev = "d36fdbdfe50a718d32fbb0838d714df09d5410f5";
+        sha256 = "d249aee1ad66dc512ce0f5c911d52ce2bc62323fa92fdf22e2acc54ed3bd6c2b";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -40,7 +40,7 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-0tjZX/YHu5gs9eUxYIpCv18iKlNMveL8wRCV1nfQSCY=";
+        hash = "sha256-Zq9uFXaDxajcHz/E0KH0lmmxgnGilVQgA/WtAYi+XlA=";
       };
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
