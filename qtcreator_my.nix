@@ -4,13 +4,13 @@ self: super: {
     with super;
     let
       pname = "qtcreator";
-      version = "25.0.0-unstable-2026-09-29";
+      version = "25.0.0-unstable-2026-11-04";
 
       src = fetchFromGitHub {
         owner = "qt-creator";
         repo = "qt-creator";
-        rev = "f1256259f42205009216ae3418340c7518069213";
-        hash = "sha256-wp7n1navYx2ws9Oz3CnaQcXLuSwERPW0M0Bx3ewZ04U=";
+        rev = "9b1e96a7860662fc12ebe28c661ec5e861f960de";
+        hash = "sha256-8be22bb33a1a9cb134cc7295d3a7fc18a8b9d724c1cbd8e640493d413374209e";
       };
 
       # Go modules for cmdbridge (same deps as 20.0.1, vendor hash unchanged)
