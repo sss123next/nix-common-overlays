@@ -9,11 +9,11 @@ self: super: {
       src = fetchFromGitHub {
         owner = "qt-creator";
         repo = "qt-creator";
-        rev = "9b1e96a7860662fc12ebe28c661ec5e861f960de";
-        hash = "sha256-8be22bb33a1a9cb134cc7295d3a7fc18a8b9d724c1cbd8e640493d413374209e";
+        rev = "313a78b1d0598911a1822faf4381ac19cf90b391";
+        hash = "sha256-CozT3oTku8REv+Bj35LPItqj0ZZ90dmL1dkWlZjGzMs=";
       };
 
-      # Go modules for cmdbridge (same deps as 20.0.1, vendor hash unchanged)
+      # Go modules for cmdbridge (go.mod unchanged on master, vendor hash unchanged)
       goModules = (buildGoModule {
         pname = "gocmdbridge";
         version = "0.0.0";
@@ -59,6 +59,8 @@ self: super: {
         qt6Pkgs.qthttpserver
         # Optional: Qt Positioning for Android/ML features
         qt6Pkgs.qtpositioning
+        # Optional: Qt Charts for the AppStatisticsMonitor plugin
+        qt6Pkgs.qtcharts
 
         # LLVM/Clang toolchain for code model
         llvmPackages_21.libclang
