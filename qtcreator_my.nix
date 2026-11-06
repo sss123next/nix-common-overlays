@@ -3,7 +3,7 @@ self: super: {
   qtcreator_my =
     with super;
     let
-      pname = "qtcreator";
+      pname = "qtcreator_my";
       version = "25.0.0-unstable-2026-11-04";
 
       src = fetchFromGitHub {
