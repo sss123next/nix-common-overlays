@@ -144,7 +144,7 @@ self: super: {
         libwebp
         libjxl
         libpng
-        libpng12
+        pkgs2505.libpng12
         libsamplerate
         libmikmod
         libtheora
