@@ -1,18 +1,18 @@
-[1mdiff --git a/packages/app/src/composer/editor/interaction.ts b/packages/app/src/composer/editor/interaction.ts[m
-[1mindex eb11fa9..ad16f9e 100644[m
-[1m--- a/packages/app/src/composer/editor/interaction.ts[m
-[1m+++ b/packages/app/src/composer/editor/interaction.ts[m
-[36m@@ -535,8 +535,11 @@[m [mexport function createComposerEditor(input: {[m
- [m
-     const stop =[m
-       (input.view.submit.working?.() || input.view.submit.held?.()) &&[m
-[31m-      ((event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "g") ||[m
-[31m-        event.key === "Escape")[m
-[32m+[m[32m      event.ctrlKey &&[m
-[32m+[m[32m      !event.metaKey &&[m
-[32m+[m[32m      !event.altKey &&[m
-[32m+[m[32m      !event.shiftKey &&[m
-[32m+[m[32m      event.key.toLowerCase() === "g"[m
- [m
-     if (stop) {[m
-       event.preventDefault()[m
+diff --git a/packages/app/src/composer/editor/interaction.ts b/packages/app/src/composer/editor/interaction.ts
+index eb11fa9..ad16f9e 100644
+--- a/packages/app/src/composer/editor/interaction.ts
++++ b/packages/app/src/composer/editor/interaction.ts
+@@ -535,8 +535,11 @@ export function createComposerEditor(input: {
+ 
+     const stop =
+       (input.view.submit.working?.() || input.view.submit.held?.()) &&
+-      ((event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "g") ||
+-        event.key === "Escape")
++      event.ctrlKey &&
++      !event.metaKey &&
++      !event.altKey &&
++      !event.shiftKey &&
++      event.key.toLowerCase() === "g"
+ 
+     if (stop) {
+       event.preventDefault()

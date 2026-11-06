@@ -6,8 +6,7 @@ self: super: {
       node_modules =
         finalAttrs:
         stdenv.mkDerivation {
-          # NB: restore pname when bumping; suffix disambiguates stale drv from old rev.
-          pname = "${finalAttrs.pname}-node_modules2";
+          pname = "${finalAttrs.pname}-node_modules";
           inherit (finalAttrs) version src;
 
           __structuredAttrs = true;
