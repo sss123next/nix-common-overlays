@@ -6,7 +6,8 @@ self: super: {
       node_modules =
         finalAttrs:
         stdenv.mkDerivation {
-          pname = "${finalAttrs.pname}-node_modules";
+          # NB: restore pname when bumping; suffix disambiguates stale drv from old rev.
+          pname = "${finalAttrs.pname}-node_modules2";
           inherit (finalAttrs) version src;
 
           __structuredAttrs = true;
@@ -74,7 +75,8 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-iWYcdqXijGUxhvOVlVl9WQbS1+SRBCSL7kYBfUsabwI=";
+            # Calibrated from remote-builder build — x86_64-linux
+            "x86_64-linux"   = "sha256-fUCz02JKlGn3eyT//NEzmebxqhATEJ2BMjUt/JV030E=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -100,9 +102,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "174200d95ef04b63ccd3e526074d740c06f03926";
+        rev = "286beb081a16d59d269b328329921fef3b15eda9";
 #        ref = "production";
-        hash = "sha256-4+Q9mfsYpoSkoRr+hvluk3bTWHT7/AREd7HEPnnC0/g=";
+        hash = "sha256-z+t0wUD9Ug5RLitIIrePyR2UkltMbBFP5DNFZzR3QbI=";
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
