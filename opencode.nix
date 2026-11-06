@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-CNND9FC8vqq9B2EyFJWmGzVbM7VhyGfHb6j4cd7j3Aw=";
+            "x86_64-linux"   = "sha256-iWYcdqXijGUxhvOVlVl9WQbS1+SRBCSL7kYBfUsabwI=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -100,22 +100,14 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "d9184f2d38e4680b266525bc4e7618245bbcef49";
+        rev = "174200d95ef04b63ccd3e526074d740c06f03926";
 #        ref = "production";
-        hash = "sha256-lzcoRJgmLDLgxpXtAlIRJ3PYGsR7rgl3tX/YfjNHPXw=";
+        hash = "sha256-4+Q9mfsYpoSkoRr+hvluk3bTWHT7/AREd7HEPnnC0/g=";
       };
 
-      # Bun's fetch enforces a default five-minute deadline on every request, which cuts long
-      # native provider streams off with `Transport error (POST .../chat/completions)` before
-      # the first byte arrives (upload + prefill > 5 min). The AISDK path and run.ts already
-      # pass `timeout: false`; the native path never gets a chance to, because
-      # Provider.nativeSettings strips `options.timeout`. Wrap the global HttpClient's fetch so
-      # every native request opts out, like packages/cli/src/run/run.ts does.
-      # Bump-dependent: must apply cleanly to the src tag above.
+      # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
+      # packages/util/src/effect/app-node-platform.ts now wraps the global HttpClient's fetch natively.
       patches = [
-        # Bun's fetch enforces a default five-minute deadline on every request; this wraps
-        # HttpClient so native requests opt out. Bump-dependent: must apply cleanly to src rev.
-        ./patches/opencode-native-fetch-timeout.patch
         # Raise the model retry budget from 10 attempts (~84s) to 65535 by default so transient
         # provider failures (e.g. HTTP 500) keep retrying for days instead of failing the step, and
         # lift the timeout-retry cap of 3 to the same budget. Override at runtime with

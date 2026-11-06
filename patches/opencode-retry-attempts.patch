@@ -1,38 +1,38 @@
-diff --git a/packages/core/src/model-retry.ts b/packages/core/src/model-retry.ts
-index 78a50a1..a702e27 100644
---- a/packages/core/src/model-retry.ts
-+++ b/packages/core/src/model-retry.ts
-@@ -19,12 +19,15 @@ const retryAfter = (input: Input) => {
-   return undefined
- }
- 
--// Exponential from 2s capped at 10s per gap, for 10 retries: 2, 4, 8, then 10 × 7, about 84s of
--// waiting when every attempt fails (67–101s with jitter). `min` takes the faster schedule, so the
--// cap applies per gap; `max` with `recurs` bounds the count.
-+// Exponential from 2s capped at 10s per gap: 2, 4, 8, then 10s steps with jitter. `min` takes the
-+// faster schedule, so the cap applies per gap; `max` with `recurs` bounds the count. The attempt
-+// count defaults to 65535 -- transient provider failures such as HTTP 500 keep retrying for days
-+// instead of giving up after ~84s -- and can be overridden with OPENCODE_RETRY_ATTEMPTS.
-+const parsedRetries = Number.parseInt(process.env.OPENCODE_RETRY_ATTEMPTS ?? "", 10)
-+const retries = Number.isNaN(parsedRetries) || parsedRetries < 0 ? 65535 : parsedRetries
- const schedule = Schedule.max([
-   Schedule.min([Schedule.exponential("2 seconds"), Schedule.spaced("10 seconds")]),
--  Schedule.recurs(10),
-+  Schedule.recurs(retries),
- ]).pipe(
-   Schedule.jittered,
-   Schedule.setInputType<Input>(),
-@@ -36,8 +39,11 @@ const schedule = Schedule.max([
- )
- 
- // A timed-out attempt already waited minutes before failing, so the general allowance would let a
--// dead provider hold a call for most of an hour. Cap those attempts well below it.
--const MAX_TIMEOUT_RETRIES = 3
-+// dead provider hold a call for most of an hour. Cap those attempts to the general retry budget.
-+// Override with OPENCODE_TIMEOUT_RETRIES to raise (or set to 0 to disable timeout retries).
-+const parsedTimeoutRetries = Number.parseInt(process.env.OPENCODE_TIMEOUT_RETRIES ?? "", 10)
-+const maxTimeoutRetries = Number.isNaN(parsedTimeoutRetries) ? retries : parsedTimeoutRetries
-+const MAX_TIMEOUT_RETRIES = maxTimeoutRetries
- 
- export const policy = Effect.gen(function* () {
-   const step = yield* Schedule.toStep(schedule)
+[1mdiff --git a/packages/core/src/model-retry.ts b/packages/core/src/model-retry.ts[m
+[1mindex 9ec5dbd..41f4998 100644[m
+[1m--- a/packages/core/src/model-retry.ts[m
+[1m+++ b/packages/core/src/model-retry.ts[m
+[36m@@ -19,12 +19,15 @@[m [mconst retryAfter = (input: Input) => {[m
+   return undefined[m
+ }[m
+ [m
+[31m-// Exponential from 2s capped at 10s per gap, for 10 retries: 2, 4, 8, then 10 × 7, about 84s of[m
+[31m-// waiting when every attempt fails (67–101s with jitter). `min` takes the faster schedule, so the[m
+[31m-// cap applies per gap; `max` with `recurs` bounds the count.[m
+[32m+[m[32m// Exponential from 2s capped at 10s per gap: 2, 4, 8, then 10s steps with jitter. `min` takes the[m
+[32m+[m[32m// faster schedule, so the cap applies per gap; `max` with `recurs` bounds the count. The attempt[m
+[32m+[m[32m// count defaults to 65535 -- transient provider failures such as HTTP 500 keep retrying for days[m
+[32m+[m[32m// instead of giving up after ~84s -- and can be overridden with OPENCODE_RETRY_ATTEMPTS.[m
+[32m+[m[32mconst parsedRetries = Number.parseInt(process.env.OPENCODE_RETRY_ATTEMPTS ?? "", 10)[m
+[32m+[m[32mconst retries = Number.isNaN(parsedRetries) || parsedRetries < 0 ? 65535 : parsedRetries[m
+ const schedule = Schedule.max([[m
+   Schedule.min([Schedule.exponential("2 seconds"), Schedule.spaced("10 seconds")]),[m
+[31m-  Schedule.recurs(10),[m
+[32m+[m[32m  Schedule.recurs(retries),[m
+ ]).pipe([m
+   Schedule.jittered,[m
+   Schedule.setInputType<Input>(),[m
+[36m@@ -61,8 +64,11 @@[m [mconst unreachableSchedule = Schedule.max([[m
+ )[m
+ [m
+ // A timed-out attempt already waited minutes before failing, so the general allowance would let a[m
+[31m-// dead provider hold a call for most of an hour. Cap those attempts well below it.[m
+[31m-const MAX_TIMEOUT_RETRIES = 3[m
+[32m+[m[32m// dead provider hold a call for most of an hour. Cap those attempts to the general retry budget.[m
+[32m+[m[32m// Override with OPENCODE_TIMEOUT_RETRIES to raise (or set to 0 to disable timeout retries).[m
+[32m+[m[32mconst parsedTimeoutRetries = Number.parseInt(process.env.OPENCODE_TIMEOUT_RETRIES ?? "", 10)[m
+[32m+[m[32mconst maxTimeoutRetries = Number.isNaN(parsedTimeoutRetries) ? retries : parsedTimeoutRetries[m
+[32m+[m[32mconst MAX_TIMEOUT_RETRIES = maxTimeoutRetries[m
+ [m
+ export const policy = Effect.gen(function* () {[m
+   const step = yield* Schedule.toStep(schedule)[m
