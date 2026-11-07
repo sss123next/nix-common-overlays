@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.26.6-unstable-2026-11-03";
+      version = "0.26.9-unstable-2026-11-07";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-11-03, "fix(vscode): keep the embedded-bundle guard failure a readable assertion (#16210)"
-        rev = "e77f73e9734f1090bd3c62c2436e6d6ea58d4e8b";
-        sha256 = "7afcedde2571a716bc3e5816c9d7d2696a6f1d2b7956f271906aa644e9df7abc";
+        # main @ 2026-11-07, "fix(core): register promoted initial commits in unborn repos (#16081)"
+        rev = "f087e699af32fed9ad6df8a345627adc9f49493a";
+        sha256 = "afe5e28afcc417107eae6150645dc2e5f69cdc47afb04461cf496ccdc12156c2";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
