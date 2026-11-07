@@ -20,15 +20,14 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "deepseek-harness";
-      # No stable tags exist yet (all releases are alpha/rc); pinned to the last
-      # master commit instead, which is tagged dsh-v0.2.2-alpha.3 but carries version 0.2.2-alpha.3.
-      version = "0.2.2-alpha.3-unstable-2026-11-03";
+      # Release candidate tags exist; pinned to the most recent one.
+      version = "0.2.2-rc.1-unstable-2026-11-07";
 
       src = fetchFromGitHub {
         owner = "deepseek-ai";
         repo = "deepseek-harness";
-        rev = "refs/tags/dsh-v0.2.2-alpha.3";
-        hash = "sha256-c9vvBXU3cEdKJxevQu297rp1UdOUMZkF0NWJsUAgOUs=";
+        rev = "refs/tags/dsh-v0.2.2-rc.1";
+        hash = "sha256-pzSBQbLwcT/wnCg4ugWq7YmRngCaFOiKVCjekI5aKa0=";
       };
 
       # packageManager: pnpm@11.28.5 (nixpkgs pnpm_11 lags a bit; tolerated);
@@ -62,7 +61,7 @@ self: super: {
       # fetchFromGitHub provides no .git; client-build-environment.ts reads this
       # public value instead of spawning `git rev-parse HEAD`, and its dirty
       # probe treats a missing git as "no metadata" (no dirty marker).
-      env.DSH_CLIENT_COMMIT_HASH = "05b1cae8db6e674c5685101494d4eec24652424a";
+      env.DSH_CLIENT_COMMIT_HASH = "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db";
 
       # `pnpm run build` (scripts/build.ts) = build:native-system (flock Node-API
       # addon; needs the node headers next to process.execPath) + build:lib (tsc
@@ -135,8 +134,9 @@ self: super: {
         v=$($out/bin/dsh --version)
         echo "dsh --version => $v"
         case "$v" in
+          0.2.2-rc.*) ;;
           0.2.2-alpha*) ;;
-          0.2.1-rc.2*) ;;
+          0.2.1-rc.*) ;;
           0.2.1-alpha*) ;;
           *) echo "ERROR: unexpected dsh version: $v" >&2; exit 1 ;;
         esac
