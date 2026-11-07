@@ -75,7 +75,7 @@ self: super: {
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
             # Calibrated from remote-builder build — x86_64-linux
-            "x86_64-linux"   = "sha256-fUCz02JKlGn3eyT//NEzmebxqhATEJ2BMjUt/JV030E=";
+            "x86_64-linux"   = "sha256-jYczkOUfYKDs2WNfQiwiIMNcWr38DDMiHOpVp6a2i4w=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -101,9 +101,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "286beb081a16d59d269b328329921fef3b15eda9";
+        rev = "8b3ff60b6c0b3b05edb7d1308e7dbd124631eed6";
 #        ref = "production";
-        hash = "sha256-z+t0wUD9Ug5RLitIIrePyR2UkltMbBFP5DNFZzR3QbI=";
+        hash = "sha256-DHYhP8zkU6HxQC5ZmgkdkV81KxV4RTYI5f5ZLLbv/js=";
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
@@ -118,6 +118,11 @@ self: super: {
         # Web GUI: stop generation on Ctrl+G only. Bare Escape still closes popovers and
         # cancels queue editing, but no longer aborts a running turn (interaction.ts). Offset 0.
         ./patches/opencode-esc-no-interrupt.patch
+        # Add "Allow always (session)" option to permission dialogs. New literal "always_session"
+        # in Permission.Reply; when chosen with checkbox "Only for this session" active, rules
+        # are saved to session.permissions (row-level, not project-level permission_saved table).
+        # Affects: schema, core, CLI-ACP, TUI, web-app. Offset 0 (rebased on 286beb08).
+        ./patches/session-scoped-permissions.patch
       ];
 
       # NOTE (production 8bca532, post-v2.2.5): the old "splitting: true -> false" workaround for the
