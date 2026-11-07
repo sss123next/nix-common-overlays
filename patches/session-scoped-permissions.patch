@@ -1,0 +1,253 @@
+From: sss <sss@example.com>
+Date: Sat, 7 Nov 2026 06:05:00 +0300
+Subject: [PATCH] feat: session-scoped "Allow always" permission
+
+Add "Only for this session" checkbox to permission dialogs. When checked,
+"Always allow" saves rules to session.permissions (row-level, per-session),
+not to the global project-level permission_saved table.
+
+UI
+--
+- New checkbox appears when request has save-patterns (save?.length > 0)
+- "Allow always" sends "always_session" instead of "always" when checked
+- TUI: "☐ Only for this session" toggle in always-detail pane
+- App: <Checkbox> below the requested patterns
+- ACP-CLI: "always_session" PermissionOption (ACP clients choose by optionId)
+
+Server (core)
+--------------
+- Reply schema extended: "always_session" alongside "once", "always", "reject"
+- "always_session" → bus.publish(SessionEvent.Permissions) → projector
+  writes to session.permission column (avoids permission_saved table)
+- "always" → saved.add(projectID, ...) unchanged (project-level durable)
+- Batch-pending auto-resolution uses input.reply (not hardcoded "always")
+
+Semantics
+---------
+- Session rules live for the session lifetime; fork copies them (existing
+  projector behavior), session deletion drops them (no separate cleanup)
+- Project-level saved approvals and session rules coexist: evaluation
+  merges both, deny-wins semantics unchanged
+
+Scope: 7 files, 53 insertions, 11 deletions
+  schema/permission.ts      |  4 ++-
+  core/permission.ts        | 18 ++++++++++++---
+  cli/acp/permission.ts     |  3 ++-
+  tui/.../permission.tsx    | 13 +++++++++++-
+  tui/util/permission.ts    |  3 ++-
+  app/.../permission-machine.ts |  2 +-
+  app/.../session-permission-dock.tsx | 21 +++++++++++++++---
+
+---
+
+diff --git a/packages/app/src/session/requests/permission-machine.ts b/packages/app/src/session/requests/permission-machine.ts
+index 3a97266240..37c99d57e7 100644
+--- a/packages/app/src/session/requests/permission-machine.ts
++++ b/packages/app/src/session/requests/permission-machine.ts
+@@ -2,7 +2,7 @@ export const PERMISSION_REPLY_TIMEOUT_MS = 15_000
+ 
+ export const PERMISSION_REPLIED_LIMIT = 256
+ 
+-export type PermissionDecision = "once" | "always" | "reject"
++export type PermissionDecision = "once" | "always" | "always_session" | "reject"
+ 
+ // One permission request's manual reply from the dock. `attempt` advances on each try, so a late failure or timeout
+ // from an earlier click cannot move a newer one. `replied` is terminal: an answered request never re-enables or
+diff --git a/packages/app/src/session/requests/session-permission-dock.tsx b/packages/app/src/session/requests/session-permission-dock.tsx
+index bb4ca07d44..c5739d2ad5 100644
+--- a/packages/app/src/session/requests/session-permission-dock.tsx
++++ b/packages/app/src/session/requests/session-permission-dock.tsx
+@@ -1,7 +1,9 @@
+ import { Option, Schema } from "effect"
++import { createStore } from "solid-js/store"
+ import { For, Show } from "solid-js"
+ import type { PermissionRequest } from "@opencode/client/promise"
+ import { Button } from "@opencode/ui/button"
++import { Checkbox } from "@opencode/ui/checkbox"
+ import { DockPrompt } from "@opencode/session-ui/dock-prompt"
+ import { Icon } from "@opencode/ui/icon"
+ import { useLanguage } from "@/runtime/i18n/language"
+@@ -13,9 +15,10 @@ const isString = Schema.is(Schema.String)
+ export function SessionPermissionDock(props: {
+   request: PermissionRequest
+   responding: boolean
+-  onDecide: (response: "once" | "always" | "reject") => void
++  onDecide: (response: "once" | "always" | "always_session" | "reject") => void
+ }) {
+   const language = useLanguage()
++  const [store, setStore] = createStore({ sessionOnly: false })
+ 
+   const toolDescription = () => {
+     const key = `settings.permissions.tool.${props.request.action}.description`
+@@ -55,10 +58,10 @@ export function SessionPermissionDock(props: {
+             <Button
+               variant="neutral"
+               size="normal"
+-              onClick={() => props.onDecide("always")}
++              onClick={() => props.onDecide(store.sessionOnly ? "always_session" : "always")}
+               disabled={props.responding}
+             >
+-              {language.t("ui.permission.allowAlways")}
++              {store.sessionOnly ? `${language.t("ui.permission.allowAlways")} (session)` : language.t("ui.permission.allowAlways")}
+             </Button>
+             <Button variant="submit" size="normal" onClick={() => props.onDecide("once")} disabled={props.responding}>
+               {language.t("ui.permission.allowOnce")}
+@@ -103,6 +106,18 @@ export function SessionPermissionDock(props: {
+           </div>
+         </div>
+       </Show>
++
++      <Show when={props.request.save?.length}>
++        <div data-slot="permission-row">
++          <span data-slot="permission-spacer" aria-hidden="true" />
++          <Checkbox
++            checked={store.sessionOnly}
++            onChange={(checked) => setStore("sessionOnly", checked)}
++          >
++            Only for this session
++          </Checkbox>
++        </div>
++      </Show>
+     </DockPrompt>
+   )
+ }
+diff --git a/packages/cli/src/acp/permission.ts b/packages/cli/src/acp/permission.ts
+index 4c33430ad3..18b0b5790c 100644
+--- a/packages/cli/src/acp/permission.ts
++++ b/packages/cli/src/acp/permission.ts
+@@ -39,6 +39,7 @@ type Input = {
+ const options: PermissionOption[] = [
+   { optionId: "once", kind: "allow_once", name: "Allow once" },
+   { optionId: "always", kind: "allow_always", name: "Always allow" },
++  { optionId: "always_session", kind: "allow_always", name: "Always allow (session)" },
+   { optionId: "reject", kind: "reject_once", name: "Reject" },
+ ]
+ 
+@@ -70,7 +71,7 @@ export const ask = Effect.fnUntraced(function* (input: Input) {
+     options,
+   })
+   const selected = result.outcome.outcome === "selected" ? result.outcome.optionId : undefined
+-  return selected === "once" || selected === "always" ? selected : "reject"
++  return selected === "once" || selected === "always" || selected === "always_session" ? selected : "reject"
+ })
+ 
+ export function respond(input: Input, decision: Permission.Reply) {
+diff --git a/packages/core/src/permission.ts b/packages/core/src/permission.ts
+index b78a674d27..e9c3a6be89 100644
+--- a/packages/core/src/permission.ts
++++ b/packages/core/src/permission.ts
+@@ -6,6 +6,7 @@ import { Permission } from "@opencode/schema/permission"
+ import type { Tool } from "@opencode/schema/tool"
+ import { Bus } from "./bus.js"
+ import { Location } from "./location.js"
++import { SessionEvent } from "./session/event.js"
+ import { Agent } from "./agent.js"
+ import { SessionErrors } from "./session/error.js"
+ import { SessionSchema } from "./session/schema.js"
+@@ -337,7 +338,18 @@ const layer = Layer.effect(
+             return
+           }
+ 
+-          if (input.reply === "always" && existing.request.save?.length) {
++          if (input.reply === "always_session" && existing.request.save?.length) {
++            yield* bus.publish(SessionEvent.Permissions, {
++              sessionID: existing.request.sessionID,
++              permissions: existing.request.save.map(
++                (resource): Permission.Rule => ({
++                  action: existing.request.action,
++                  resource,
++                  effect: "allow" as const,
++                }),
++              ),
++            })
++          } else if (input.reply === "always" && existing.request.save?.length) {
+             yield* saved.add({
+               projectID: location.project.id,
+               action: existing.request.action,
+@@ -346,7 +358,7 @@ const layer = Layer.effect(
+           }
+           yield* Deferred.succeed(existing.deferred, undefined)
+           pending.delete(input.requestID)
+-          if (input.reply !== "always" || !existing.request.save?.length) return
++          if ((input.reply !== "always" && input.reply !== "always_session") || !existing.request.save?.length) return
+ 
+           for (const [id, item] of pending) {
+             const result = yield* evaluateInput({ ...item.request, agent: item.agent }).pipe(
+@@ -356,7 +368,7 @@ const layer = Layer.effect(
+             yield* bus.publish(Permission.Event.Replied, {
+               sessionID: item.request.sessionID,
+               requestID: item.request.id,
+-              reply: "always",
++              reply: input.reply,
+             })
+             yield* Deferred.succeed(item.deferred, undefined)
+             pending.delete(id)
+diff --git a/packages/schema/src/permission.ts b/packages/schema/src/permission.ts
+index 41887ed9ea..c5788518ba 100644
+--- a/packages/schema/src/permission.ts
++++ b/packages/schema/src/permission.ts
+@@ -39,7 +39,9 @@ export const Request = Schema.Struct({
+ }).annotate({ identifier: "Permission.Request" })
+ export interface Request extends Schema.Schema.Type<typeof Request> {}
+ 
+-export const Reply = Schema.Literals(["once", "always", "reject"]).annotate({ identifier: "Permission.Reply" })
++export const Reply = Schema.Literals(["once", "always", "reject", "always_session"]).annotate({
++  identifier: "Permission.Reply",
++})
+ export type Reply = typeof Reply.Type
+ 
+ const Asked = ephemeral({ type: "permission.asked", schema: Request.fields })
+diff --git a/packages/tui/src/routes/session/permission.tsx b/packages/tui/src/routes/session/permission.tsx
+index 3618f19e0f..0733b49209 100644
+--- a/packages/tui/src/routes/session/permission.tsx
++++ b/packages/tui/src/routes/session/permission.tsx
+@@ -115,6 +115,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
+   const toast = useToast()
+   const [store, setStore] = createStore({
+     stage: "permission" as PermissionStage,
++    sessionOnly: false,
+   })
+   const pathFormatter = usePathFormatter()
+   const session = createMemo(() => data.session.get(props.request.sessionID))
+@@ -226,6 +227,16 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
+                     <For each={permissionAlwaysLines(props.request)}>
+                       {(line, index) => <text fg={index() === 0 ? theme.text.muted : theme.text.base}>{line}</text>}
+                     </For>
++                    <Show when={props.request.save?.length}>
++                      <box flexDirection="row" gap={1} paddingLeft={1}>
++                        <text
++                          fg={store.sessionOnly ? theme.text.action.primary.focused : theme.text.muted}
++                          onMouseUp={() => setStore("sessionOnly", (v) => !v)}
++                        >
++                          {store.sessionOnly ? "☑" : "☐"} Only for this session
++                        </text>
++                      </box>
++                    </Show>
+                   </box>
+                 </Show>
+               )}
+@@ -242,7 +253,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
+               fullscreen
+               onSelect={(option) => {
+                 if (option === "always") {
+-                  reply("always")
++                  reply(store.sessionOnly ? "always_session" : "always")
+                   return
+                 }
+                 if (option === "reject") {
+diff --git a/packages/tui/src/util/permission.ts b/packages/tui/src/util/permission.ts
+index 09d607ff37..df798dfde3 100644
+--- a/packages/tui/src/util/permission.ts
++++ b/packages/tui/src/util/permission.ts
+@@ -159,9 +159,10 @@ export function permissionAlwaysLines(input: { action: string; save?: ReadonlyAr
+   return ["This will always allow the following patterns for this project.", ...save.map((item) => `- ${item}`)]
+ }
+ 
+-export function permissionOptionLabel(option: "once" | "always" | "reject" | "confirm" | "cancel") {
++export function permissionOptionLabel(option: "once" | "always" | "always_session" | "reject" | "confirm" | "cancel") {
+   if (option === "once") return "Allow once"
+   if (option === "always") return "Always allow"
++  if (option === "always_session") return "Always allow (session)"
+   if (option === "reject") return "Reject"
+   if (option === "confirm") return "Confirm"
+   return "Cancel"
