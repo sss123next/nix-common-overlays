@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.26.9-unstable-2026-11-07";
+      version = "0.27.0-unstable-2026-11-08";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-11-07, "fix(core): register promoted initial commits in unborn repos (#16081)"
-        rev = "f087e699af32fed9ad6df8a345627adc9f49493a";
-        sha256 = "afe5e28afcc417107eae6150645dc2e5f69cdc47afb04461cf496ccdc12156c2";
+        # main @ 2026-11-08, "fix(web-shell): close managed host integration gaps left by the host mount entry (#16200)"
+        rev = "1888aaf49d52638d84b6feaebebd5b19a62c3126";
+        sha256 = "f1a4d309734835dd68906df37d85ba50068267fa47ac7a29e0998233ce65600d";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
