@@ -3,6 +3,7 @@ self: super: {
   flectar-mail =
     with super;
     let
+      # Бросаем кость nix-демону: меняем при каждом коммите оверлея.
       dlopenLibs = [
         libxkbcommon
         libGL
@@ -11,7 +12,7 @@ self: super: {
     in
     rustPlatform.buildRustPackage {
       pname = "flectar-mail";
-      version = "0.1.0-unstable-2026-11-07";
+      version = "0.1.0-unstable-2026-11-08";
 
       src = fetchgit {
         url = "https://github.com/flectar/mail";
@@ -62,8 +63,6 @@ self: super: {
 
       # xkbcommon-dl dlopen()s libxkbcommon-x11.so — tell fediverse about it.
       # Force rebuild marker.
-      forceRebuild = 1;
-
       meta = with lib; {
         description = "A native email client built with Rust, Slint, and Blitz";
         longDescription = ''
