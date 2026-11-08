@@ -60,7 +60,10 @@ self: super: {
           --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath dlopenLibs}"
       '';
 
-      # xkbcommon-dl dlopen()s libxkbcommon-x11.so — tell fediverse about it
+      # xkbcommon-dl dlopen()s libxkbcommon-x11.so — tell fediverse about it.
+      # Force rebuild marker.
+      forceRebuild = 1;
+
       meta = with lib; {
         description = "A native email client built with Rust, Slint, and Blitz";
         longDescription = ''
