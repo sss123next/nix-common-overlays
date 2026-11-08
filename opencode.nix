@@ -75,7 +75,7 @@ self: super: {
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
             # Calibrated from remote-builder build — x86_64-linux
-            "x86_64-linux"   = "sha256-jYczkOUfYKDs2WNfQiwiIMNcWr38DDMiHOpVp6a2i4w=";
+            "x86_64-linux"   = "sha256-2lZC+v/j78ArDVqtYiJVrYErGTwqQqFz2sPFv7vPCNc=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -101,9 +101,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "10952cd57e64ce423a9e483ea0b96361e033d2b5";
+        rev = "84ea1bd71fb82ed594af217d8362339288276870";
 #        ref = "production";
-        hash = "sha256-6lxhgJsw17D10sbj3//WmS8gwAMQMEhGfVPGZFglEvM=";
+        hash = "sha256-kwxtRf1rndU9htZcoPdEvbOSn8YPRgkLrYVmuicnngQ=";
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
