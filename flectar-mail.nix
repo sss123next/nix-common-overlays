@@ -12,7 +12,7 @@ self: super: {
     in
     rustPlatform.buildRustPackage {
       pname = "flectar-mail";
-      version = "0.1.0-unstable-2026-11-08";
+      version = "0.1.0-unstable-2026-11-08a";
 
       src = fetchgit {
         url = "https://github.com/flectar/mail";
