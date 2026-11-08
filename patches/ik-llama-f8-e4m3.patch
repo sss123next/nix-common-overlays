@@ -9,1054 +9,1054 @@ New ggml type FP8 E4M3 (OCP), 1 byte/element, with:
 - GGML_TYPE_COUNT=400 to avoid GCC 15 designated-init error
 - llama-quantize-ik.cpp for nix build
 
-[1mdiff --git a/examples/quantize/llama-quantize-ik.cpp b/examples/quantize/llama-quantize-ik.cpp[m
-[1mnew file mode 100644[m
-[1mindex 00000000..19295029[m
-[1m--- /dev/null[m
-[1m+++ b/examples/quantize/llama-quantize-ik.cpp[m
-[36m@@ -0,0 +1,860 @@[m
-[32m+[m[32m//[m
-[32m+[m[32m// Copyright (C) 2023-2025 The llama.cpp authors[m
-[32m+[m[32m// Copyright (C) 2024-2025 Iwan Kawrakow[m
-[32m+[m[32m// MIT license[m
-[32m+[m[32m// SPDX-License-Identifier: MIT[m
-[32m+[m[32m//[m
-[32m+[m
-[32m+[m[32m#include "common.h"[m
-[32m+[m[32m#include "llama.h"[m
-[32m+[m
-[32m+[m[32m#include <cctype>[m
-[32m+[m[32m#include <cstdio>[m
-[32m+[m[32m#include <cstring>[m
-[32m+[m[32m#include <vector>[m
-[32m+[m[32m#include <string>[m
-[32m+[m[32m#include <unordered_map>[m
-[32m+[m[32m#include <fstream>[m
-[32m+[m[32m#include <sstream>[m
-[32m+[m[32m#include <cmath>[m
-[32m+[m
-[32m+[m[32mstruct quant_option {[m
-[32m+[m[32m    std::string name;[m
-[32m+[m[32m    llama_ftype ftype;[m
-[32m+[m[32m    std::string desc;[m
-[32m+[m[32m};[m
-[32m+[m
-[32m+[m[32mstatic const std::vector<struct quant_option> QUANT_OPTIONS = {[m
-[32m+[m[32m    { "Q4_0",     LLAMA_FTYPE_MOSTLY_Q4_0,     " 3.56G, +0.2166 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q4_1",     LLAMA_FTYPE_MOSTLY_Q4_1,     " 3.90G, +0.1585 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q5_0",     LLAMA_FTYPE_MOSTLY_Q5_0,     " 4.33G, +0.0683 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q5_1",     LLAMA_FTYPE_MOSTLY_Q5_1,     " 4.70G, +0.0349 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q6_0",     LLAMA_FTYPE_MOSTLY_Q6_0,     " 6.5 bpw quantization",             },[m
-[32m+[m[32m    { "MXFP4",    LLAMA_FTYPE_MOSTLY_MXFP4,    " 4.25 bpw 4-bit float quantization",},[m
-[32m+[m[32m    { "MXFP4_R8", LLAMA_FTYPE_MOSTLY_MXFP4_R8, " MXFP4 repacked",                   },[m
-[32m+[m[32m    { "IQ2_XXS",  LLAMA_FTYPE_MOSTLY_IQ2_XXS,  " 2.06 bpw quantization",            },[m
-[32m+[m[32m    { "IQ2_XXS_R4",LLAMA_FTYPE_MOSTLY_IQ2_XXS_R4,"IQ2_XXS repacked",            },[m
-[32m+[m[32m    { "IQ2_XS",   LLAMA_FTYPE_MOSTLY_IQ2_XS,   " 2.31 bpw quantization",            },[m
-[32m+[m[32m    { "IQ2_XS_R4",LLAMA_FTYPE_MOSTLY_IQ2_XS_R4,"IQ2_XS repacked",            },[m
-[32m+[m[32m    { "IQ2_S",    LLAMA_FTYPE_MOSTLY_IQ2_S,    " 2.5  bpw quantization",            },[m
-[32m+[m[32m    { "IQ2_M",    LLAMA_FTYPE_MOSTLY_IQ2_M,    " 2.7  bpw quantization",            },[m
-[32m+[m[32m    { "IQ2_M_R4", LLAMA_FTYPE_MOSTLY_IQ2_M_R4, " 2.7  bpw quantization",            },[m
-[32m+[m[32m    { "IQ1_S",    LLAMA_FTYPE_MOSTLY_IQ1_S,    " 1.56 bpw quantization",            },[m
-[32m+[m[32m    { "IQ1_S_R4", LLAMA_FTYPE_MOSTLY_IQ1_S_R4, " 1.5 bpw quantization",             },[m
-[32m+[m[32m    { "IQ1_M_R4", LLAMA_FTYPE_MOSTLY_IQ1_M_R4, " 1.75 bpw quantization",            },[m
-[32m+[m[32m    { "IQ1_M",    LLAMA_FTYPE_MOSTLY_IQ1_M,    " 1.75 bpw quantization",            },[m
-[32m+[m[32m    { "IQ1_BN",   LLAMA_FTYPE_MOSTLY_IQ1_BN,   " 1.62 bpw quantization (Bitnet)",   },[m
-[32m+[m[32m    { "IQ2_BN",   LLAMA_FTYPE_MOSTLY_IQ2_BN,   " 2.00 bpw quantization (Bitnet)",   },[m
-[32m+[m[32m    { "IQ2_BN_R4",LLAMA_FTYPE_MOSTLY_IQ2_BN_R4," 2.00 bpw quantization (Bitnet)",   },[m
-[32m+[m[32m    { "PQ2_0",    LLAMA_FTYPE_MOSTLY_PQ2_0,    " 2.13 bpw ternary, group-128 (Prism)", },[m
-[32m+[m[32m    { "PTQ1_0",   LLAMA_FTYPE_MOSTLY_PTQ1_0,   " 1.75 bpw ternary, base-3 (Prism)", },[m
-[32m+[m[32m    { "PQ2_0_R8", LLAMA_FTYPE_MOSTLY_PQ2_0_R8, " 2.13 bpw ternary, group-128 (Prism)", },[m
-[32m+[m[32m    { "PTQ1_0_R8",LLAMA_FTYPE_MOSTLY_PTQ1_0_R8," 1.75 bpw ternary, base-3 (Prism)", },[m
-[32m+[m[32m    { "Q2_K",     LLAMA_FTYPE_MOSTLY_Q2_K,     " 2.63G, +0.6717 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q2_K_R4",  LLAMA_FTYPE_MOSTLY_Q2_K_R4,  "Q2_K_S repacked", },[m
-[32m+[m[32m    { "Q2_K_S",   LLAMA_FTYPE_MOSTLY_Q2_K_S,   " 2.16G, +9.0634 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "IQ3_XXS",  LLAMA_FTYPE_MOSTLY_IQ3_XXS,  " 3.06 bpw quantization",            },[m
-[32m+[m[32m    { "IQ3_KT",   LLAMA_FTYPE_MOSTLY_IQ3_KT,   " 3.125 bpw trellis quantization",   },[m
-[32m+[m[32m    { "IQ4_KT",   LLAMA_FTYPE_MOSTLY_IQ4_KT,   " 4.0 bpw trellis quantization",     },[m
-[32m+[m[32m    { "IQ3_XXS_R4",LLAMA_FTYPE_MOSTLY_IQ3_XXS_R4,"IQ3_XXS repacked",            },[m
-[32m+[m[32m    { "IQ3_S",    LLAMA_FTYPE_MOSTLY_IQ3_S,    " 3.44 bpw quantization",            },[m
-[32m+[m[32m    { "IQ3_S_R4", LLAMA_FTYPE_MOSTLY_IQ3_S_R4, "IQ3_S repacked",            },[m
-[32m+[m[32m    { "IQ3_M",    LLAMA_FTYPE_MOSTLY_IQ3_M,    " 3.66 bpw quantization mix",        },[m
-[32m+[m[32m    { "Q3_K",     LLAMA_FTYPE_MOSTLY_Q3_K_M,   "alias for Q3_K_M" },[m
-[32m+[m[32m    { "Q3_K_R4",  LLAMA_FTYPE_MOSTLY_Q3_K_R4,  "Q3_K_S repacked" },[m
-[32m+[m[32m    { "IQ3_XS",   LLAMA_FTYPE_MOSTLY_IQ3_XS,   " 3.3 bpw quantization"   ,          },[m
-[32m+[m[32m    { "Q3_K_S",   LLAMA_FTYPE_MOSTLY_Q3_K_S,   " 2.75G, +0.5551 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q3_K_M",   LLAMA_FTYPE_MOSTLY_Q3_K_M,   " 3.07G, +0.2496 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q3_K_L",   LLAMA_FTYPE_MOSTLY_Q3_K_L,   " 3.35G, +0.1764 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "IQ4_NL",   LLAMA_FTYPE_MOSTLY_IQ4_NL,   " 4.50 bpw non-linear quantization", },[m
-[32m+[m[32m    { "IQ4_NL_R4",LLAMA_FTYPE_MOSTLY_IQ4_NL_R4," 4.50 bpw non-linear quantization", },[m
-[32m+[m[32m    { "IQ4_XS_R8",LLAMA_FTYPE_MOSTLY_IQ4_XS_R8," 4.25 bpw non-linear quantization", },[m
-[32m+[m[32m    { "Q4_0_R8",  LLAMA_FTYPE_MOSTLY_Q4_0_R8,  " 4.50 bpw quantization",            },[m
-[32m+[m[32m    { "Q5_0_R4",  LLAMA_FTYPE_MOSTLY_Q5_0_R4,  " 5.50 bpw quantization",            },[m
-[32m+[m[32m    { "Q6_0_R4",  LLAMA_FTYPE_MOSTLY_Q6_0_R4,  " 6.50 bpw quantization",            },[m
-[32m+[m[32m    { "Q8_0_R8",  LLAMA_FTYPE_MOSTLY_Q8_0_R8,  " 8.50 bpw quantization",            },[m
-[32m+[m[32m    { "Q8_KV",    LLAMA_FTYPE_MOSTLY_Q8_KV,    " 8.00 bpw quantization",            },[m
-[32m+[m[32m    { "IQ4_XS",   LLAMA_FTYPE_MOSTLY_IQ4_XS,   " 4.25 bpw non-linear quantization", },[m
-[32m+[m[32m    { "IQ4_KS",   LLAMA_FTYPE_MOSTLY_IQ4_KS,   " 4.25 bpw non-linear quantization", },[m
-[32m+[m[32m    { "IQ4_KS_R4",LLAMA_FTYPE_MOSTLY_IQ4_KS_R4,"IQ4_KS 4-row repacked", },[m
-[32m+[m[32m    { "IQ4_KS_R16",LLAMA_FTYPE_MOSTLY_IQ4_KS_R16,"IQ4_KS 16-row repacked", },[m
-[32m+[m[32m    { "IQ5_KS_R16",LLAMA_FTYPE_MOSTLY_IQ5_KS_R16,"IQ5_KS 16-row repacked", },[m
-[32m+[m[32m    { "IQ3_KS_R16",LLAMA_FTYPE_MOSTLY_IQ3_KS_R16,"IQ3_KS 16-row repacked", },[m
-[32m+[m[32m    { "IQ5_KS_R4",LLAMA_FTYPE_MOSTLY_IQ5_KS_R4,"IQ5_KS repacked", },[m
-[32m+[m[32m    { "IQ4_KSS",  LLAMA_FTYPE_MOSTLY_IQ4_KSS,  " 4.0 bpw non-linear quantization",  },[m
-[32m+[m[32m    { "IQ5_KS",   LLAMA_FTYPE_MOSTLY_IQ5_KS,   " 5.25 bpw non-linear quantization", },[m
-[32m+[m[32m    { "IQ2_K",    LLAMA_FTYPE_MOSTLY_IQ2_K,    " 2.375 bpw non-linear quantization",},[m
-[32m+[m[32m    { "IQ2_K_R4", LLAMA_FTYPE_MOSTLY_IQ2_K_R4, "IQ2_K repacked",},[m
-[32m+[m[32m    { "IQ2_KS",   LLAMA_FTYPE_MOSTLY_IQ2_KS,   " 2.1875 bpw non-linear quantization",},[m
-[32m+[m[32m    { "IQ1_KT",   LLAMA_FTYPE_MOSTLY_IQ1_KT,   " 1.75 bpw trellis quantization",   },[m
-[32m+[m[32m    { "IQ2_KT",   LLAMA_FTYPE_MOSTLY_IQ2_KT,   " 2.125 bpw trellis quantization",   },[m
-[32m+[m[32m    { "IQ2_KL",   LLAMA_FTYPE_MOSTLY_IQ2_KL,   " 2.69 bpw non-linear quantization", },[m
-[32m+[m[32m    { "IQ3_KS",   LLAMA_FTYPE_MOSTLY_IQ3_KS,   " 3.19 bpw non-linear quantization", },[m
-[32m+[m[32m    { "IQ3_K",    LLAMA_FTYPE_MOSTLY_IQ3_K,    " 3.44 bpw non-linear quantization", },[m
-[32m+[m[32m    { "IQ3_K_R4", LLAMA_FTYPE_MOSTLY_IQ3_K_R4, "IQ3_K repacked", },[m
-[32m+[m[32m    { "IQ3_KL",   LLAMA_FTYPE_MOSTLY_IQ3_KL,   " 4 bpw non-linear quantization mix",},[m
-[32m+[m[32m    { "IQ4_K",    LLAMA_FTYPE_MOSTLY_IQ4_K,    " 4.5 bpw non-linear quantization",  },[m
-[32m+[m[32m    { "IQ4_K_R4", LLAMA_FTYPE_MOSTLY_IQ4_K_R4, "IQ4_K repacked",  },[m
-[32m+[m[32m    { "IQ5_K",    LLAMA_FTYPE_MOSTLY_IQ5_K,    " 5.5 bpw non-linear quantization",  },[m
-[32m+[m[32m    { "IQ5_K_R4", LLAMA_FTYPE_MOSTLY_IQ5_K_R4, "IQ5_K repacked",  },[m
-[32m+[m[32m    { "IQ6_K",    LLAMA_FTYPE_MOSTLY_IQ6_K,    " 6.6 bpw non-linear quantization",  },[m
-[32m+[m[32m    { "Q4_K",     LLAMA_FTYPE_MOSTLY_Q4_K_M,   "alias for Q4_K_M", },[m
-[32m+[m[32m    { "Q4_K_R4",  LLAMA_FTYPE_MOSTLY_Q4_K_R4,  "Q4_K_S repacked", },[m
-[32m+[m[32m    { "Q4_K_S",   LLAMA_FTYPE_MOSTLY_Q4_K_S,   " 3.59G, +0.0992 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q4_K_M",   LLAMA_FTYPE_MOSTLY_Q4_K_M,   " 3.80G, +0.0532 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q5_K",     LLAMA_FTYPE_MOSTLY_Q5_K_M,   "alias for Q5_K_M", },[m
-[32m+[m[32m    { "Q5_K_R4",  LLAMA_FTYPE_MOSTLY_Q5_K_R4,  "Q5_K_S repacked", },[m
-[32m+[m[32m    { "Q5_K_S",   LLAMA_FTYPE_MOSTLY_Q5_K_S,   " 4.33G, +0.0400 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q5_K_M",   LLAMA_FTYPE_MOSTLY_Q5_K_M,   " 4.45G, +0.0122 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q6_K",     LLAMA_FTYPE_MOSTLY_Q6_K,     " 5.15G, +0.0008 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q6_K_R4",  LLAMA_FTYPE_MOSTLY_Q6_K_R4,  "Q6_K repacked", },[m
-[32m+[m[32m    { "Q8_K_R8",  LLAMA_FTYPE_MOSTLY_Q8_K_R8,  "Q8_K repacked", },[m
-[32m+[m[32m    { "Q8_K_R16", LLAMA_FTYPE_MOSTLY_Q8_K_R16, "Q8_K repacked", },[m
-[32m+[m[32m    { "Q8_KV_R8", LLAMA_FTYPE_MOSTLY_Q8_KV_R8, "Q8_KV repacked", },[m
-[32m+[m[32m    { "Q8_0",     LLAMA_FTYPE_MOSTLY_Q8_0,     " 6.70G, +0.0004 ppl @ LLaMA-v1-7B", },[m
-[32m+[m[32m    { "Q4_0_4_4", LLAMA_FTYPE_MOSTLY_Q4_0_4_4, " 4.34G, +0.4685 ppl @ Llama-3-8B",  },[m
-[32m+[m[32m    { "Q4_0_4_8", LLAMA_FTYPE_MOSTLY_Q4_0_4_8, " 4.34G, +0.4685 ppl @ Llama-3-8B",  },[m
-[32m+[m[32m    { "Q4_0_8_8", LLAMA_FTYPE_MOSTLY_Q4_0_8_8, " 4.34G, +0.4685 ppl @ Llama-3-8B",  },[m
-[32m+[m[32m    { "F16",      LLAMA_FTYPE_MOSTLY_F16,      "14.00G, -0.0020 ppl @ Mistral-7B", },[m
-[32m+[m[32m    { "BF16",     LLAMA_FTYPE_MOSTLY_BF16,     "14.00G, -0.0050 ppl @ Mistral-7B", },[m
-[32m+[m[32m    { "BF16_R16", LLAMA_FTYPE_MOSTLY_BF16_R16, "14.00G, -0.0050 ppl @ Mistral-7B", },[m
-[32m+[m[32m    { "F32",      LLAMA_FTYPE_ALL_F32,         "26.00G              @ 7B", },[m
-[32m+[m[32m    // Note: Ensure COPY comes after F32 to avoid ftype 0 from matching.[m
-[32m+[m[32m    { "COPY",     LLAMA_FTYPE_ALL_F32,         "only copy tensors, no quantizing",  },[m
-[32m+[m[32m};[m
-[32m+[m
-[32m+[m[32mstatic const char * const LLM_KV_QUANTIZE_IMATRIX_FILE       = "quantize.imatrix.file";[m
-[32m+[m[32mstatic const char * const LLM_KV_QUANTIZE_IMATRIX_DATASET    = "quantize.imatrix.dataset";[m
-[32m+[m[32mstatic const char * const LLM_KV_QUANTIZE_IMATRIX_N_ENTRIES  = "quantize.imatrix.entries_count";[m
-[32m+[m[32mstatic const char * const LLM_KV_QUANTIZE_IMATRIX_N_CHUNKS   = "quantize.imatrix.chunks_count";[m
-[32m+[m
-[32m+[m[32mstatic bool try_parse_ftype(const std::string & ftype_str_in, llama_ftype & ftype, std::string & ftype_str_out) {[m
-[32m+[m[32m    std::string ftype_str;[m
-[32m+[m
-[32m+[m[32m    for (auto ch : ftype_str_in) {[m
-[32m+[m[32m        ftype_str.push_back(std::toupper(ch));[m
-[32m+[m[32m    }[m
-[32m+[m[32m    for (auto & it : QUANT_OPTIONS) {[m
-[32m+[m[32m        if (it.name == ftype_str) {[m
-[32m+[m[32m            ftype = it.ftype;[m
-[32m+[m[32m            ftype_str_out = it.name;[m
-[32m+[m[32m            return true;[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m[32m    try {[m
-[32m+[m[32m        int ftype_int = std::stoi(ftype_str);[m
-[32m+[m[32m        for (auto & it : QUANT_OPTIONS) {[m
-[32m+[m[32m            if (it.ftype == ftype_int) {[m
-[32m+[m[32m                ftype = it.ftype;[m
-[32m+[m[32m                ftype_str_out = it.name;[m
-[32m+[m[32m                return true;[m
-[32m+[m[32m            }[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m[32m    catch (...) {[m
-[32m+[m[32m        // stoi failed[m
-[32m+[m[32m    }[m
-[32m+[m[32m    return false;[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32m// usage:[m
-[32m+[m[32m//  ./llama-quantize [--allow-requantize] [--leave-output-tensor] [--pure] models/llama/ggml-model.gguf [models/llama/ggml-model-quant.gguf] type [nthreads][m
-[32m+[m[32m//[m
-[32m+[m[32m[[noreturn]][m
-[32m+[m[32mstatic void usage(const char * executable) {[m
-[32m+[m[32m    printf("usage: %s [--help] [--allow-requantize] [--leave-output-tensor] [--pure] [--imatrix] [--hide-imatrix] [--ignore-imatrix-rules] [--dry-run] [--slab-size] [--cuda-quantize] [-dev/--device] [-ts/--tensor-split] [--include-weights] [--exclude-weights] [--output-tensor-type] [--token-embedding-type] [--per-layer-token-embedding-type] [--extra-output-tensor] [--fudge-factors] [--ffn-gate-inp-type] [--attn-q-type] [--attn-k-type] [--attn-v-type] [--attn-qkv-type] [--attn-output-type] [--ffn-gate-type] [--ffn-down-type] [--ffn-up-type] [--repack] [--repack-pattern] [--keep-split] [--partial-requant] [--override-kv] model-f32.gguf [model-quant.gguf] type [nthreads]\n\n", executable);[m
-[32m+[m[32m    printf("  --allow-requantize: Allows requantizing tensors that have already been quantized. Warning: This can severely reduce quality compared to quantizing from 16bit or 32bit\n");[m
-[32m+[m[32m    printf("  --leave-output-tensor: Will leave output.weight un(re)quantized. Increases model size but may also increase quality, especially when requantizing\n");[m
-[32m+[m[32m    printf("  --pure: Disable k-quant mixtures and quantize all tensors to the same type\n");[m
-[32m+[m[32m    printf("  --imatrix file_name: use data in file_name as importance matrix for quant optimizations\n");[m
-[32m+[m[32m    printf("  --hide-imatrix: do not store imatrix details in the quantized model\n");[m
-[32m+[m[32m    printf("  --ignore-imatrix-rules: ignore importance matrix rules when quantizing\n");[m
-[32m+[m[32m    printf("  --dry-run: show what would be quantized without actually writing the output file\n");[m
-[32m+[m[32m    printf("  --slab-size N: process tensors larger than N MiB of f32 in slabs of up to N MiB, or of one expert slice or row group if that is larger (default: 1024, 0 = never)\n");[m
-[32m+[m[32m    printf("  --cuda-quantize: quantize IQ4_KT, IQ3_KT, IQ2_KT, IQ1_KT, IQ3_KS, IQ4_KS, IQ4_KS_R4, IQ4_KS_R16, IQ5_KS, and IQ5_KS_R4 tensors on a CUDA device; other types use the CPU\n");[m
-[32m+[m[32m    printf("  -dev DEVICES, --device DEVICES: CUDA device(s) for --cuda-quantize (default CUDA0; 2+ devices = row-split, e.g. -dev CUDA0,CUDA1)\n");[m
-[32m+[m[32m    printf("  -ts SPLIT, --tensor-split SPLIT: row-split shares for 2+ GPUs (e.g. -ts 3,3,2; equal when absent; requires -dev/--device with 2+ CUDA devices)\n");[m
-[32m+[m[32m    printf("  --include-weights tensor_name: use importance matrix for this/these tensor(s)\n");[m
-[32m+[m[32m    printf("  --exclude-weights tensor_name: use importance matrix for this/these tensor(s)\n");[m
-[32m+[m[32m    printf("  --output-tensor-type ggml_type: use this ggml_type for the output.weight tensor.\n");[m
-[32m+[m[32m    printf("  --token-embedding-type ggml_type: use this ggml_type for the token_embd.weight tensor.\n");[m
-[32m+[m[32m    printf("  --per-layer-token-embedding-type ggml_type: use this ggml_type for all per-layer token_embd.weight tensors.\n\n");[m
-[32m+[m[32m    printf("  --extra-output-tensor ggml_type: requantize and add output tensor of that type.\n");[m
-[32m+[m[32m    printf("  --ffn-gate-inp-type ggml_type: use this ggml_type for the ffn_gate_inp tensors.\n\n");[m
-[32m+[m[32m    printf("  --custom-q regex1=type1,regex2=type2...: use this to specify custom quantization type rules.\n\n");[m
-[32m+[m[32m    printf("  --repack Repack all tensors to the corresponding _r4/8 variant if available.\n\n");[m
-[32m+[m[32m    printf("  --repack-pattern Comma separated list of regexs to use for matching tensor names to be repacked.\n\n");[m
-[32m+[m[32m    printf("  --symmetric-q40  Use [-7:7] range for Q4_0 quantization (turns off imatrix)\n\n");[m
-[32m+[m[32m    printf("  --slow-iq2ks Use the original very slow IQ2_KS quantization method.\n\n");[m
-[32m+[m[32m    printf("  --fudge-factors type1=ff1,type2=ff2... Apply scale fudge factors during quantization as specified by type=fudge-factor.\n\n");[m
-[32m+[m[32m    printf("Additional specific tensor quantization types used in the custom quant scheme 'CQS (default is Q2_K):\n");[m
-[32m+[m[32m    printf("      --attn-q-type ggml_type: use this ggml_type for the attn_q.weight tensor.\n");[m
-[32m+[m[32m    printf("      --attn-k-type ggml_type: use this ggml_type for the attn_k.weight tensor.\n");[m
-[32m+[m[32m    printf("      --attn-v-type ggml_type: use this ggml_type for the attn_v.weight tensor.\n");[m
-[32m+[m[32m    printf("      --attn-qkv-type ggml_type: use this ggml_type for the attn_qkv.weight tensor.\n");[m
-[32m+[m[32m    printf("      --attn-output-type ggml_type: use this ggml_type for the attn_output.weight tensor.\n");[m
-[32m+[m[32m    printf("      --ffn-gate-type ggml_type: use this ggml_type for the ffn_gate tensor.\n");[m
-[32m+[m[32m    printf("      --ffn-down-type ggml_type: use this ggml_type for the ffn_down tensor.\n");[m
-[32m+[m[32m    printf("      --ffn-up-type ggml_type: use this ggml_type for the ffn_up tensor.\n\n");[m
-[32m+[m[32m    printf("  --keep-split: will generate quantized model in the same shards as input\n");[m
-[32m+[m[32m    printf("  --partial-requant: quantize only missing split files in the split quantized .gguf destination directory\n");[m
-[32m+[m[32m    printf("  --override-kv KEY=TYPE:VALUE\n");[m
-[32m+[m[32m    printf("      Advanced option to override model metadata by key in the quantized model. May be specified multiple times.\n\n");[m
-[32m+[m[32m    printf("Note: --include-weights and --exclude-weights cannot be used together\n");[m
-[32m+[m[32m    printf("Note: The token embeddings tensor is loaded in system RAM, even in case of full GPU/VRAM offload.\n");[m
-[32m+[m[32m    printf("Note: The recommended type for the output tensor is q6_K for the ffn types > iq3_xxs and < q8_0.\n\n");[m
-[32m+[m[32m    printf("Note for the Custom Quant Scheme FTYPE:\n");[m
-[32m+[m[32m    printf("    Write the specific tensor legacy quants as qN_N, the K-Quants as qN_K, the IQ-Quants as iqN_xx.\n");[m
-[32m+[m[32m    printf("    Usually, attn-q-type can be one type below the chosen ffn type, and attn-v-type should be one type above.\n");[m
-[32m+[m[32m    printf("    attn-qkv-type replaces the types attn-q, attn-k and attn-v on some models.\n");[m
-[32m+[m[32m    //TODO: - eventually - harmonize the CAPS writing of the FTYPEs, and non CAPS writing of the GGML_TYPEs.[m
-[32m+[m[32m    printf("\nAllowed quantization types:\n");[m
-[32m+[m[32m    for (auto & it : QUANT_OPTIONS) {[m
-[32m+[m[32m        if (it.name != "COPY") {[m
-[32m+[m[32m            printf("  %2d  or  ", it.ftype);[m
-[32m+[m[32m        } else {[m
-[32m+[m[32m            printf("          ");[m
-[32m+[m[32m        }[m
-[32m+[m[32m        printf("%-7s : %s\n", it.name.c_str(), it.desc.c_str());[m
-[32m+[m[32m    }[m
-[32m+[m[32m    exit(1);[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32mstatic int load_imatrix(const std::string & imatrix_file, std::string & imatrix_dataset, std::unordered_map<std::string, std::vector<float>> & imatrix_data) {[m
-[32m+[m[32m    std::ifstream in(imatrix_file.c_str(), std::ios::binary);[m
-[32m+[m[32m    if (!in) {[m
-[32m+[m[32m        printf("%s: failed to open %s\n",__func__, imatrix_file.c_str());[m
-[32m+[m[32m        exit(1);[m
-[32m+[m[32m    }[m
-[32m+[m[32m    int n_entries;[m
-[32m+[m[32m    in.read((char *)&n_entries, sizeof(n_entries));[m
-[32m+[m[32m    if (in.fail() || n_entries < 1) {[m
-[32m+[m[32m        printf("%s: no data in file %s\n", __func__, imatrix_file.c_str());[m
-[32m+[m[32m        exit(1);[m
-[32m+[m[32m    }[m
-[32m+[m[32m    for (int i = 0; i < n_entries; ++i) {[m
-[32m+[m[32m        int len; in.read((char *)&len, sizeof(len));[m
-[32m+[m[32m        std::vector<char> name_as_vec(len+1);[m
-[32m+[m[32m        in.read((char *)name_as_vec.data(), len);[m
-[32m+[m[32m        if (in.fail()) {[m
-[32m+[m[32m            printf("%s: failed reading name for entry %d from %s\n", __func__, i+1, imatrix_file.c_str());[m
-[32m+[m[32m            exit(1);[m
-[32m+[m[32m        }[m
-[32m+[m[32m        name_as_vec[len] = 0;[m
-[32m+[m[32m        std::string name{name_as_vec.data()};[m
-[32m+[m[32m        auto & e = imatrix_data[name];[m
-[32m+[m[32m        int ncall;[m
-[32m+[m[32m        in.read((char *)&ncall, sizeof(ncall));[m
-[32m+[m[32m        int nval;[m
-[32m+[m[32m        in.read((char *)&nval, sizeof(nval));[m
-[32m+[m[32m        if (in.fail() || nval < 1) {[m
-[32m+[m[32m            printf("%s: failed reading number of values for entry %d\n", __func__, i);[m
-[32m+[m[32m            imatrix_data = {};[m
-[32m+[m[32m            exit(1);[m
-[32m+[m[32m        }[m
-[32m+[m[32m        e.resize(nval);[m
-[32m+[m[32m        in.read((char *)e.data(), nval*sizeof(float));[m
-[32m+[m[32m        if (in.fail()) {[m
-[32m+[m[32m            printf("%s: failed reading data for entry %d\n", __func__, i);[m
-[32m+[m[32m            imatrix_data = {};[m
-[32m+[m[32m            exit(1);[m
-[32m+[m[32m        }[m
-[32m+[m[32m        if (ncall > 0) {[m
-[32m+[m[32m            for (auto& v : e) v /= ncall;[m
-[32m+[m[32m        }[m
-[32m+[m
-[32m+[m[32m        if (getenv("LLAMA_TRACE")) {[m
-[32m+[m[32m            printf("%s: loaded data (size = %6d, ncall = %6d) for '%s'\n", __func__, int(e.size()), ncall, name.c_str());[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    // latest imatrix version contains the dataset filename at the end of the file[m
-[32m+[m[32m    int m_last_call = 0;[m
-[32m+[m[32m    if (in.peek() != EOF) {[m
-[32m+[m[32m        in.read((char *)&m_last_call, sizeof(m_last_call));[m
-[32m+[m[32m        int dataset_len;[m
-[32m+[m[32m        in.read((char *)&dataset_len, sizeof(dataset_len));[m
-[32m+[m[32m        std::vector<char> dataset_as_vec(dataset_len);[m
-[32m+[m[32m        in.read(dataset_as_vec.data(), dataset_len);[m
-[32m+[m[32m        imatrix_dataset.assign(dataset_as_vec.begin(), dataset_as_vec.end());[m
-[32m+[m[32m        printf("%s: imatrix dataset='%s'\n", __func__, imatrix_dataset.c_str());[m
-[32m+[m[32m    }[m
-[32m+[m[32m    printf("%s: loaded %d importance matrix entries from %s computed on %d chunks\n", __func__, int(imatrix_data.size()), imatrix_file.c_str(), m_last_call);[m
-[32m+[m[32m    return m_last_call;[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32mstatic int prepare_imatrix(const std::string & imatrix_file,[m
-[32m+[m[32m        std::string & imatrix_dataset,[m
-[32m+[m[32m        const std::vector<std::string> & included_weights,[m
-[32m+[m[32m        const std::vector<std::string> & excluded_weights,[m
-[32m+[m[32m        std::unordered_map<std::string, std::vector<float>> & imatrix_data) {[m
-[32m+[m[32m    int m_last_call = -1;[m
-[32m+[m[32m    if (!imatrix_file.empty()) {[m
-[32m+[m[32m        m_last_call = load_imatrix(imatrix_file, imatrix_dataset, imatrix_data);[m
-[32m+[m[32m    }[m
-[32m+[m[32m    if (imatrix_data.empty()) {[m
-[32m+[m[32m        return m_last_call;[m
-[32m+[m[32m    }[m
-[32m+[m[32m    if (!excluded_weights.empty()) {[m
-[32m+[m[32m        for (auto& name : excluded_weights) {[m
-[32m+[m[32m            for (auto it = imatrix_data.begin(); it != imatrix_data.end(); ) {[m
-[32m+[m[32m                auto pos = it->first.find(name);[m
-[32m+[m[32m                if (pos != std::string::npos) it = imatrix_data.erase(it);[m
-[32m+[m[32m                else ++it;[m
-[32m+[m[32m            }[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m[32m    if (!included_weights.empty()) {[m
-[32m+[m[32m        std::unordered_map<std::string, std::vector<float>> tmp;[m
-[32m+[m[32m        for (auto& name : included_weights) {[m
-[32m+[m[32m            for (auto& e : imatrix_data) {[m
-[32m+[m[32m                auto pos = e.first.find(name);[m
-[32m+[m[32m                if (pos != std::string::npos) {[m
-[32m+[m[32m                    tmp.emplace(std::move(e));[m
-[32m+[m[32m                }[m
-[32m+[m[32m            }[m
-[32m+[m[32m        }[m
-[32m+[m[32m        imatrix_data = std::move(tmp);[m
-[32m+[m[32m    }[m
-[32m+[m[32m    if (!imatrix_data.empty()) {[m
-[32m+[m[32m        printf("%s: have %d importance matrix entries\n", __func__, int(imatrix_data.size()));[m
-[32m+[m[32m    }[m
-[32m+[m[32m    return m_last_call;[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32mstatic ggml_type parse_ggml_type(const char * arg) {[m
-[32m+[m[32m    ggml_type result = GGML_TYPE_COUNT;[m
-[32m+[m[32m    std::string arg_lower{arg};[m
-[32m+[m[32m    for (auto & c : arg_lower) c = std::tolower(c);[m
-[32m+[m[32m    for (int j = 0; j < GGML_TYPE_COUNT; ++j) {[m
-[32m+[m[32m        auto type = ggml_type(j);[m
-[32m+[m[32m        const auto * name = ggml_type_name(type);[m
-[32m+[m[32m        if (name) {[m
-[32m+[m[32m            if (strcmp(arg, name) == 0) return type;[m
-[32m+[m[32m            std::string name_lower{name};[m
-[32m+[m[32m            for (auto & c : name_lower) c = std::tolower(c);[m
-[32m+[m[32m            if (name_lower == arg_lower) return type;[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m[32m    return result;[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32musing CustomQ = std::pair<std::string, ggml_type>;[m
-[32m+[m
-[32m+[m[32mstatic bool parse_custom_quants(const std::string& arg, std::vector<CustomQ>& custom_quants) {[m
-[32m+[m[32m    for (const auto & item : string_split<std::string>(arg, ',')) {[m
-[32m+[m[32m        auto pos = item.find('=');[m
-[32m+[m[32m        if (pos == std::string::npos) {[m
-[32m+[m[32m            fprintf(stderr, "Invalid custom quantization input %s\n", arg.c_str());[m
-[32m+[m[32m            return false;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        auto pattern = item.substr(0, pos);[m
-[32m+[m[32m        auto type_as_string = item.substr(pos + 1);[m
-[32m+[m[32m        auto type = parse_ggml_type(type_as_string.c_str());[m
-[32m+[m[32m        if (type == GGML_TYPE_COUNT) {[m
-[32m+[m[32m            fprintf(stderr, "Invalid quantization type '%s' in custom quantization input %s\n", type_as_string.c_str(), item.c_str());[m
-[32m+[m[32m            return false;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        printf("Adding custom rule %s -> %s\n", pattern.c_str(), ggml_type_name(type));[m
-[32m+[m[32m        custom_quants.emplace_back(std::move(pattern), type);[m
-[32m+[m[32m    }[m
-[32m+[m[32m    return true;[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32m// Parse a common-style CUDA list (CUDA0,CUDA1, bare index ok) into ordinals.[m
-[32m+[m[32mstatic bool parse_cuda_device_list(const std::string & arg, std::vector<int> & devs) {[m
-[32m+[m[32m    std::vector<int> out;[m
-[32m+[m[32m    for (const auto & item : string_split<std::string>(arg, ',')) {[m
-[32m+[m[32m        size_t beg = item.find_first_not_of(" \t");[m
-[32m+[m[32m        size_t end = item.find_last_not_of(" \t");[m
-[32m+[m[32m        if (beg == std::string::npos) {[m
-[32m+[m[32m            return false;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        std::string first = item.substr(beg, end - beg + 1);[m
-[32m+[m[32m        std::string digits = first;[m
-[32m+[m[32m        if (first.size() > 4 && (first.compare(0, 4, "CUDA") == 0 || first.compare(0, 4, "cuda") == 0)) {[m
-[32m+[m[32m            digits = first.substr(4);[m
-[32m+[m[32m        }[m
-[32m+[m[32m        if (digits.empty()) {[m
-[32m+[m[32m            return false;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        for (char c : digits) {[m
-[32m+[m[32m            if (!isdigit((unsigned char) c)) {[m
-[32m+[m[32m                return false;[m
-[32m+[m[32m            }[m
-[32m+[m[32m        }[m
-[32m+[m[32m        try {[m
-[32m+[m[32m            out.push_back(std::stoi(digits));[m
-[32m+[m[32m        }[m
-[32m+[m[32m        catch (const std::exception &) {[m
-[32m+[m[32m            return false;[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m[32m    if (out.empty()) {[m
-[32m+[m[32m        return false;[m
-[32m+[m[32m    }[m
-[32m+[m[32m    devs = std::move(out);[m
-[32m+[m[32m    return true;[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32mstatic bool parse_fudge_factors(const std::string & arg, std::unordered_map<ggml_type, float> & factors) {[m
-[32m+[m[32m    for (const auto & item : string_split<std::string>(arg, ',')) {[m
-[32m+[m[32m        auto pos = item.find('=');[m
-[32m+[m[32m        if (pos == std::string::npos) {[m
-[32m+[m[32m            fprintf(stderr, "Invalid fudge factor input %s\n", arg.c_str());[m
-[32m+[m[32m            return false;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        auto type_as_string = item.substr(0, pos);[m
-[32m+[m[32m        auto value_as_string = item.substr(pos + 1);[m
-[32m+[m[32m        auto type = parse_ggml_type(type_as_string.c_str());[m
-[32m+[m[32m        if (type == GGML_TYPE_COUNT) {[m
-[32m+[m[32m            fprintf(stderr, "Invalid quantization type '%s' in fudge factor input %s\n", type_as_string.c_str(), item.c_str());[m
-[32m+[m[32m            return false;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        std::istringstream stream(value_as_string);[m
-[32m+[m[32m        float val; stream >> val;[m
-[32m+[m[32m        if (stream.fail()) {[m
-[32m+[m[32m            fprintf(stderr, "Invalid fudge factor '%s' in fudge factor input %s\n", value_as_string.c_str(), item.c_str());[m
-[32m+[m[32m            return false;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        factors[type] = val;[m
-[32m+[m[32m        printf("Adding scale fudge factor = %g for type %s\n", val, ggml_type_name(type));[m
-[32m+[m[32m    }[m
-[32m+[m[32m    return true;[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32mint main(int argc, char ** argv) {[m
-[32m+[m[32m    if (argc < 3) {[m
-[32m+[m[32m        usage(argv[0]);[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    llama_model_quantize_params params = llama_model_quantize_default_params();[m
-[32m+[m
-[32m+[m[32m    int arg_idx = 1;[m
-[32m+[m[32m    std::string imatrix_file;[m
-[32m+[m[32m    std::vector<std::string> included_weights, excluded_weights;[m
-[32m+[m[32m    std::vector<llama_model_kv_override> kv_overrides;[m
-[32m+[m[32m    std::vector<CustomQ> custom_quants;[m
-[32m+[m[32m    quantize_user_data user_data = { false, false };[m
-[32m+[m[32m    params.user_data = &user_data;[m
-[32m+[m
-[32m+[m[32m    std::vector<std::string> repack_patterns;[m
-[32m+[m
-[32m+[m[32m    std::unordered_map<ggml_type, float> fudge_factors;[m
-[32m+[m
-[32m+[m[32m    bool hide_imatrix = false;[m
-[32m+[m
-[32m+[m[32m    std::vector<int> cuda_devs;[m
-[32m+[m[32m    std::vector<float> cuda_ts;[m
-[32m+[m[32m    bool have_cuda_ts = false;[m
-[32m+[m
-[32m+[m[32m    for (; arg_idx < argc && (strncmp(argv[arg_idx], "--", 2) == 0 || strcmp(argv[arg_idx], "-dev") == 0 || strcmp(argv[arg_idx], "-ts") == 0); arg_idx++) {[m
-[32m+[m[32m        if (strcmp(argv[arg_idx], "--leave-output-tensor") == 0) {[m
-[32m+[m[32m            params.quantize_output_tensor = false;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--ignore-imatrix-rules") == 0) {[m
-[32m+[m[32m            params.ignore_imatrix_rules = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--dry-run") == 0) {[m
-[32m+[m[32m            params.dry_run = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--slab-size") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                try {[m
-[32m+[m[32m                    params.slab_size = std::stoull(argv[++arg_idx]) << 20;[m
-[32m+[m[32m                }[m
-[32m+[m[32m                catch (const std::exception & e) {[m
-[32m+[m[32m                    fprintf(stderr, "%s: invalid slab size '%s' (%s)\n", __func__, argv[arg_idx], e.what());[m
-[32m+[m[32m                    return 1;[m
-[32m+[m[32m                }[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--cuda-quantize") == 0) {[m
-[32m+[m[32m            params.cuda_quantize = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--device") == 0 || strcmp(argv[arg_idx], "-dev") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                std::vector<int> devs;[m
-[32m+[m[32m                if (!parse_cuda_device_list(argv[++arg_idx], devs)) {[m
-[32m+[m[32m                    fprintf(stderr, "%s: invalid CUDA device '%s' (expected CUDA<N> list, e.g. CUDA0,CUDA1, or bare index)\n", __func__, argv[arg_idx]);[m
-[32m+[m[32m                    return 1;[m
-[32m+[m[32m                }[m
-[32m+[m[32m                cuda_devs = std::move(devs);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--tensor-split") == 0 || strcmp(argv[arg_idx], "-ts") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                std::vector<float> ts;[m
-[32m+[m[32m                for (const auto & item : string_split<std::string>(argv[++arg_idx], ',')) {[m
-[32m+[m[32m                    try {[m
-[32m+[m[32m                        const float v = std::stof(item);[m
-[32m+[m[32m                        if (!std::isfinite(v) || v <= 0.0f) {[m
-[32m+[m[32m                            throw std::runtime_error("non-positive");[m
-[32m+[m[32m                        }[m
-[32m+[m[32m                        ts.push_back(v);[m
-[32m+[m[32m                    }[m
-[32m+[m[32m                    catch (const std::exception &) {[m
-[32m+[m[32m                        fprintf(stderr, "%s: invalid tensor-split entry '%s' in '%s' (expected positive numbers, e.g. -ts 3,3,2)\n", __func__, item.c_str(), argv[arg_idx]);[m
-[32m+[m[32m                        return 1;[m
-[32m+[m[32m                    }[m
-[32m+[m[32m                }[m
-[32m+[m[32m                if (ts.empty()) {[m
-[32m+[m[32m                    fprintf(stderr, "%s: empty tensor-split list '%s'\n", __func__, argv[arg_idx]);[m
-[32m+[m[32m                    return 1;[m
-[32m+[m[32m                }[m
-[32m+[m[32m                cuda_ts = std::move(ts);[m
-[32m+[m[32m                have_cuda_ts = true;[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--symmetric-q40") == 0) {[m
-[32m+[m[32m            user_data.symmetric_q4_0 = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--slow-iq2ks") == 0) {[m
-[32m+[m[32m            user_data.slow_iq2_ks = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--repack") == 0) {[m
-[32m+[m[32m            params.only_repack = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--repack-pattern") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                auto p = string_split(argv[++arg_idx], ',');[m
-[32m+[m[32m                repack_patterns.insert(repack_patterns.end(), p.begin(), p.end());[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--output-tensor-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.output_tensor_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--extra-output-tensor") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.extra_output_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--token-embedding-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.token_embedding_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--per-layer-token-embedding-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.per_layer_token_embedding_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--ffn-gate-inp-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.ffn_gate_inp_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--attn-q-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.attn_q_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--attn-k-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.attn_k_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--attn-v-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.attn_v_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--attn-qkv-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.attn_qkv_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--attn-output-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.attn_output_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--ffn-gate-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.ffn_gate_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--ffn-down-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.ffn_down_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--ffn-up-type") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                params.ffn_up_type = parse_ggml_type(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--override-kv") == 0) {[m
-[32m+[m[32m            if (arg_idx == argc-1 || !string_parse_kv_override(argv[++arg_idx], kv_overrides)) {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--custom-q") == 0) {[m
-[32m+[m[32m            if (arg_idx == argc-1 || !parse_custom_quants(argv[++arg_idx], custom_quants)) {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--fudge-factors") == 0) {[m
-[32m+[m[32m            if (arg_idx == argc-1 || !parse_fudge_factors(argv[++arg_idx], fudge_factors)) {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--allow-requantize") == 0) {[m
-[32m+[m[32m            params.allow_requantize = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--pure") == 0) {[m
-[32m+[m[32m            params.pure = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--imatrix") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                imatrix_file = argv[++arg_idx];[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--hide-imatrix") == 0) {[m
-[32m+[m[32m            hide_imatrix = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--include-weights") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                included_weights.emplace_back(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--exclude-weights") == 0) {[m
-[32m+[m[32m            if (arg_idx < argc-1) {[m
-[32m+[m[32m                excluded_weights.emplace_back(argv[++arg_idx]);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                usage(argv[0]);[m
-[32m+[m[32m            }[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--keep-split") == 0) {[m
-[32m+[m[32m            params.keep_split = true;[m
-[32m+[m[32m        } else if (strcmp(argv[arg_idx], "--partial-requant") == 0) {[m
-[32m+[m[32m            params.partial_requant = true;[m
-[32m+[m[32m        } else {[m
-[32m+[m[32m            usage(argv[0]);[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    if (!fudge_factors.empty()) {[m
-[32m+[m[32m        for (auto [type, factor] : fudge_factors) {[m
-[32m+[m[32m            ggml_set_quantize_fudge_factor(type, factor);[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    // 1 device = mono, otherwise N-way shares (equal when -ts is absent).[m
-[32m+[m[32m    if (!cuda_devs.empty() || have_cuda_ts) {[m
-[32m+[m[32m        if (cuda_devs.empty()) {[m
-[32m+[m[32m            fprintf(stderr, "%s: -ts/--tensor-split needs -dev/--device with at least 2 CUDA devices\n", __func__);[m
-[32m+[m[32m            return 1;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        if (have_cuda_ts && cuda_ts.size() != cuda_devs.size()) {[m
-[32m+[m[32m            fprintf(stderr, "%s: tensor-split entries (%zu) must match device count (%zu)\n", __func__, cuda_ts.size(), cuda_devs.size());[m
-[32m+[m[32m            return 1;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        if (cuda_devs.size() > 16) {[m
-[32m+[m[32m            fprintf(stderr, "%s: at most 16 CUDA devices supported, got %zu\n", __func__, cuda_devs.size());[m
-[32m+[m[32m            return 1;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        params.cuda_quantize_device = cuda_devs[0];[m
-[32m+[m[32m        if (cuda_devs.size() > 1) {[m
-[32m+[m[32m            params.cuda_quantize_n_devices = static_cast<int>(cuda_devs.size());[m
-[32m+[m[32m            float total = 0.0f;[m
-[32m+[m[32m            for (size_t i = 0; i < cuda_devs.size(); ++i) {[m
-[32m+[m[32m                total += have_cuda_ts ? cuda_ts[i] : 1.0f;[m
-[32m+[m[32m            }[m
-[32m+[m[32m            for (size_t i = 0; i < cuda_devs.size(); ++i) {[m
-[32m+[m[32m                params.cuda_quantize_devices[i] = cuda_devs[i];[m
-[32m+[m[32m                params.cuda_quantize_split[i] = (have_cuda_ts ? cuda_ts[i] : 1.0f)/total;[m
-[32m+[m[32m            }[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    if (!repack_patterns.empty()) {[m
-[32m+[m[32m        params.repack_pattern = &repack_patterns;[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    if (argc - arg_idx < 2) {[m
-[32m+[m[32m        printf("%s: bad arguments\n", argv[0]);[m
-[32m+[m[32m        usage(argv[0]);[m
-[32m+[m[32m    }[m
-[32m+[m[32m    if (!included_weights.empty() && !excluded_weights.empty()) {[m
-[32m+[m[32m        usage(argv[0]);[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    std::string imatrix_dataset;[m
-[32m+[m[32m    std::unordered_map<std::string, std::vector<float>> imatrix_data;[m
-[32m+[m[32m    int m_last_call = prepare_imatrix(imatrix_file, imatrix_dataset, included_weights, excluded_weights, imatrix_data);[m
-[32m+[m[32m    if (!imatrix_data.empty()) {[m
-[32m+[m[32m        params.imatrix = &imatrix_data;[m
-[32m+[m[32m        {[m
-[32m+[m[32m            llama_model_kv_override kvo;[m
-[32m+[m[32m            std::strcpy(kvo.key, LLM_KV_QUANTIZE_IMATRIX_FILE);[m
-[32m+[m[32m            kvo.tag = LLAMA_KV_OVERRIDE_TYPE_STR;[m
-[32m+[m[32m            if (hide_imatrix) {[m
-[32m+[m[32m                strncpy(kvo.val_str, "top_secret", 127);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                strncpy(kvo.val_str, imatrix_file.c_str(), 127);[m
-[32m+[m[32m            }[m
-[32m+[m[32m            kvo.val_str[127] = '\0';[m
-[32m+[m[32m            kv_overrides.emplace_back(std::move(kvo));[m
-[32m+[m[32m        }[m
-[32m+[m[32m        if (!imatrix_dataset.empty()) {[m
-[32m+[m[32m            llama_model_kv_override kvo;[m
-[32m+[m[32m            std::strcpy(kvo.key, LLM_KV_QUANTIZE_IMATRIX_DATASET);[m
-[32m+[m[32m            kvo.tag = LLAMA_KV_OVERRIDE_TYPE_STR;[m
-[32m+[m[32m            if (hide_imatrix) {[m
-[32m+[m[32m                strncpy(kvo.val_str, "top_secret", 127);[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                strncpy(kvo.val_str, imatrix_dataset.c_str(), 127);[m
-[32m+[m[32m            }[m
-[32m+[m[32m            kvo.val_str[127] = '\0';[m
-[32m+[m[32m            kv_overrides.emplace_back(std::move(kvo));[m
-[32m+[m[32m        }[m
-[32m+[m
-[32m+[m[32m        {[m
-[32m+[m[32m            llama_model_kv_override kvo;[m
-[32m+[m[32m            std::strcpy(kvo.key, LLM_KV_QUANTIZE_IMATRIX_N_ENTRIES);[m
-[32m+[m[32m            kvo.tag = LLAMA_KV_OVERRIDE_TYPE_INT;[m
-[32m+[m[32m            if (hide_imatrix) {[m
-[32m+[m[32m                kvo.val_i64 = 0;[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                kvo.val_i64 = imatrix_data.size();[m
-[32m+[m[32m            }[m
-[32m+[m[32m            kv_overrides.emplace_back(std::move(kvo));[m
-[32m+[m[32m        }[m
-[32m+[m
-[32m+[m[32m        if (m_last_call > 0) {[m
-[32m+[m[32m            llama_model_kv_override kvo;[m
-[32m+[m[32m            std::strcpy(kvo.key, LLM_KV_QUANTIZE_IMATRIX_N_CHUNKS);[m
-[32m+[m[32m            kvo.tag = LLAMA_KV_OVERRIDE_TYPE_INT;[m
-[32m+[m[32m            if (hide_imatrix) {[m
-[32m+[m[32m                kvo.val_i64 = 0;[m
-[32m+[m[32m            } else {[m
-[32m+[m[32m                kvo.val_i64 = m_last_call;[m
-[32m+[m[32m            }[m
-[32m+[m[32m            kv_overrides.emplace_back(std::move(kvo));[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m[32m    if (!kv_overrides.empty()) {[m
-[32m+[m[32m        kv_overrides.emplace_back();[m
-[32m+[m[32m        kv_overrides.back().key[0] = 0;[m
-[32m+[m[32m        params.kv_overrides = &kv_overrides;[m
-[32m+[m[32m    }[m
-[32m+[m[32m    if (!custom_quants.empty()) {[m
-[32m+[m[32m        params.custom_quants = &custom_quants;[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    llama_backend_init();[m
-[32m+[m
-[32m+[m[32m    // parse command line arguments[m
-[32m+[m[32m    const std::string fname_inp = argv[arg_idx];[m
-[32m+[m[32m    arg_idx++;[m
-[32m+[m[32m    std::string fname_out;[m
-[32m+[m
-[32m+[m[32m    std::string ftype_str;[m
-[32m+[m[32m    std::string suffix = ".gguf";[m
-[32m+[m[32m    if (try_parse_ftype(argv[arg_idx], params.ftype, ftype_str)) {[m
-[32m+[m[32m        std::string fpath;[m
-[32m+[m[32m        const size_t pos = fname_inp.find_last_of("/\\");[m
-[32m+[m[32m        if (pos != std::string::npos) {[m
-[32m+[m[32m            fpath = fname_inp.substr(0, pos + 1);[m
-[32m+[m[32m        }[m
-[32m+[m
-[32m+[m[32m        // export as [inp path]/ggml-model-[ftype]. Only add extension if there is no splitting[m
-[32m+[m[32m        fname_out = fpath + "ggml-model-" + ftype_str;[m
-[32m+[m[32m        if (!params.keep_split) {[m
-[32m+[m[32m            fname_out += suffix;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        arg_idx++;[m
-[32m+[m[32m        if (ftype_str == "COPY") {[m
-[32m+[m[32m            params.only_copy = true;[m
-[32m+[m[32m        }[m
-[32m+[m[32m    } else {[m
-[32m+[m[32m        fname_out = argv[arg_idx];[m
-[32m+[m[32m        if (params.keep_split && fname_out.find(suffix) != std::string::npos) {[m
-[32m+[m[32m            fname_out = fname_out.substr(0, fname_out.length() - suffix.length());[m
-[32m+[m[32m        }[m
-[32m+[m[32m        arg_idx++;[m
-[32m+[m
-[32m+[m[32m        if (argc <= arg_idx) {[m
-[32m+[m[32m            fprintf(stderr, "%s: missing ftype\n", __func__);[m
-[32m+[m[32m            return 1;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        if (!try_parse_ftype(argv[arg_idx], params.ftype, ftype_str)) {[m
-[32m+[m[32m            fprintf(stderr, "%s: invalid ftype '%s'\n", __func__, argv[arg_idx]);[m
-[32m+[m[32m            return 1;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        if (ftype_str == "COPY") {[m
-[32m+[m[32m           params.only_copy = true;[m
-[32m+[m[32m        }[m
-[32m+[m[32m        arg_idx++;[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    // parse nthreads[m
-[32m+[m[32m    if (argc > arg_idx) {[m
-[32m+[m[32m        try {[m
-[32m+[m[32m            params.nthread = std::stoi(argv[arg_idx]);[m
-[32m+[m[32m        }[m
-[32m+[m[32m        catch (const std::exception & e) {[m
-[32m+[m[32m            fprintf(stderr, "%s: invalid nthread '%s' (%s)\n", __func__, argv[arg_idx], e.what());[m
-[32m+[m[32m            return 1;[m
-[32m+[m[32m        }[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    if (!params.ignore_imatrix_rules && imatrix_data.empty() &&[m
-[32m+[m[32m        (params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_XS || params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_XXS ||[m
-[32m+[m[32m         params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_S  || params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_XXS_R4 ||[m
-[32m+[m[32m         params.ftype == LLAMA_FTYPE_MOSTLY_Q2_K_S || params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_XS_R4 ||[m
-[32m+[m[32m         params.ftype == LLAMA_FTYPE_MOSTLY_IQ1_S  ||[m
-[32m+[m[32m         params.ftype == LLAMA_FTYPE_MOSTLY_IQ1_S_R4 ||[m
-[32m+[m[32m         params.ftype == LLAMA_FTYPE_MOSTLY_IQ1_M_R4 ||[m
-[32m+[m[32m         params.ftype == LLAMA_FTYPE_MOSTLY_IQ1_M)) {[m
-[32m+[m[32m        fprintf(stderr, "\n==========================================================================================================\n");[m
-[32m+[m[32m        fprintf(stderr, "Please do not use IQ1_S, IQ1_M, IQ2_S, IQ2_XXS, IQ2_XS or Q2_K_S quantization without an importance matrix\n");[m
-[32m+[m[32m        fprintf(stderr, "==========================================================================================================\n\n\n");[m
-[32m+[m[32m        return 1;[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    print_build_info();[m
-[32m+[m
-[32m+[m[32m    fprintf(stderr, "%s: quantizing '%s' to '%s' as %s", __func__, fname_inp.c_str(), fname_out.c_str(), ftype_str.c_str());[m
-[32m+[m[32m    if (params.nthread > 0) {[m
-[32m+[m[32m        fprintf(stderr, " using %d threads", params.nthread);[m
-[32m+[m[32m    }[m
-[32m+[m[32m    fprintf(stderr, "\n");[m
-[32m+[m
-[32m+[m[32m    const int64_t t_main_start_us = llama_time_us();[m
-[32m+[m
-[32m+[m[32m    int64_t t_quantize_us = 0;[m
-[32m+[m
-[32m+[m[32m    // load the model[m
-[32m+[m[32m    {[m
-[32m+[m[32m        const int64_t t_start_us = llama_time_us();[m
-[32m+[m
-[32m+[m[32m        if (llama_model_quantize(fname_inp.c_str(), fname_out.c_str(), &params)) {[m
-[32m+[m[32m            fprintf(stderr, "%s: failed to quantize model from '%s'\n", __func__, fname_inp.c_str());[m
-[32m+[m[32m            return 1;[m
-[32m+[m[32m        }[m
-[32m+[m
-[32m+[m[32m        t_quantize_us = llama_time_us() - t_start_us;[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    // report timing[m
-[32m+[m[32m    {[m
-[32m+[m[32m        const int64_t t_main_end_us = llama_time_us();[m
-[32m+[m
-[32m+[m[32m        printf("\n");[m
-[32m+[m[32m        printf("%s: quantize time = %8.2f ms\n", __func__, t_quantize_us/1000.0);[m
-[32m+[m[32m        printf("%s:    total time = %8.2f ms\n", __func__, (t_main_end_us - t_main_start_us)/1000.0);[m
-[32m+[m[32m    }[m
-[32m+[m
-[32m+[m[32m    llama_backend_free();[m
-[32m+[m
-[32m+[m[32m    return 0;[m
-[32m+[m[32m}[m
-[1mdiff --git a/ggml/include/ggml.h b/ggml/include/ggml.h[m
-[1mindex a7c3d99a..db7519e4 100644[m
-[1m--- a/ggml/include/ggml.h[m
-[1m+++ b/ggml/include/ggml.h[m
-[36m@@ -384,6 +384,8 @@[m [mextern "C" {[m
-     GGML_API void        ggml_fp32_to_bf16_row_ref(const float *, ggml_bf16_t *, int64_t);[m
-     GGML_API void        ggml_fp32_to_bf16_row(const float *, ggml_bf16_t *, int64_t);[m
- [m
-[32m+[m[32m    typedef struct { uint8_t bits; } ggml_fp8_e4m3_t;[m
-[32m+[m
-     struct ggml_object;[m
-     struct ggml_context;[m
- [m
-[36m@@ -427,6 +429,8 @@[m [mextern "C" {[m
-         GGML_TYPE_MXFP4     = 39,  // so we are compatible with mainline[m
-         GGML_TYPE_Q1_0_G128 = 41,  // Bonsai 1-bit quants[m
-         GGML_TYPE_Q2_0      = 42,  // same type id as mainline GGML_TYPE_Q2_0[m
-[32m+[m[32m        // OCP FP8 E4M3 (signed, 4 exp + 3 mantissa, E4M3)[m
-[32m+[m[32m        GGML_TYPE_F8_E4M3   = 43,  // same ID as mainline[m
-         //[m
-         //[m
-         GGML_TYPE_Q8_0_X4 = 97,[m
-[36m@@ -498,7 +502,7 @@[m [mextern "C" {[m
-         GGML_TYPE_Q8_K_R16   = 397,[m
-         GGML_TYPE_Q8_KV_R8   = 398,[m
-         GGML_TYPE_Q8_K_R8    = 399,[m
-[31m-        GGML_TYPE_COUNT,[m
-[32m+[m[32m        GGML_TYPE_COUNT = 400,[m
-     };[m
- [m
-     // precision[m
-[36m@@ -544,6 +548,7 @@[m [mextern "C" {[m
-         GGML_FTYPE_MOSTLY_Q4_0_4_8 = 27, // except 1d tensors[m
-         GGML_FTYPE_MOSTLY_Q4_0_8_8 = 28, // except 1d tensors[m
-         GGML_FTYPE_MOSTLY_Q1_0_128 = 29, // except 1d tensors[m
-[32m+[m[32m        GGML_FTYPE_MOSTLY_F8_E4M3  = 42, // except 1d tensors[m
-         //[m
-         GGML_FTYPE_MOSTLY_Q6_0    = 127, // except 1d tensors[m
-         GGML_FTYPE_MOSTLY_IQ1_BN  = 128, // except 1d tensors[m
-[1mdiff --git a/ggml/src/ggml-impl.h b/ggml/src/ggml-impl.h[m
-[1mindex 62f07e1e..5c0f1adf 100644[m
-[1m--- a/ggml/src/ggml-impl.h[m
-[1m+++ b/ggml/src/ggml-impl.h[m
-[36m@@ -95,6 +95,33 @@[m [mstatic inline float ggml_compute_bf16_to_fp32(ggml_bf16_t h) {[m
-     return u.f;[m
- }[m
- [m
-[32m+[m[32mstatic inline float ggml_f8_e4m3_to_fp32(uint8_t x) {[m
-[32m+[m[32m    const uint8_t ax = x & 0x7F;[m
-[32m+[m[32m    if (ax == 0x7F) { return NAN; }[m
-[32m+[m[32m    const int exp = (ax >> 3) & 0xF;[m
-[32m+[m[32m    const int man = ax & 0x7;[m
-[32m+[m[32m    const float value = exp == 0[m
-[32m+[m[32m        ? ldexpf((float) man, -9)[m
-[32m+[m[32m        : ldexpf(1.0f + (float) man / 8.0f, exp - 7);[m
-[32m+[m[32m    return x & 0x80 ? -value : value;[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32mstatic inline uint8_t ggml_fp32_to_f8_e4m3(float x) {[m
-[32m+[m[32m    const uint8_t sign = signbit(x) ? 0x80 : 0;[m
-[32m+[m[32m    x = fabsf(x);[m
-[32m+[m[32m    if (isnan(x)) { return 0x7F; }[m
-[32m+[m[32m    if (x == 0.0f) { return sign; }[m
-[32m+[m[32m    if (isinf(x) || x >= 448.0f) { return sign | 0x7E; }[m
-[32m+[m[32m    if (x < 0.015625f) { return sign | (uint8_t) (int)(x * 512.0f + 0.5f); }[m
-[32m+[m[32m    int exp;[m
-[32m+[m[32m    const float mantissa = frexpf(x, &exp) * 2.0f;[m
-[32m+[m[32m    int encoded_exp = exp + 6;[m
-[32m+[m[32m    int encoded_man = (int)((mantissa - 1.0f) * 8.0f + 0.5f);[m
-[32m+[m[32m    if (encoded_man == 8) { encoded_man = 0; encoded_exp++; }[m
-[32m+[m[32m    if (encoded_exp > 15 || (encoded_exp == 15 && encoded_man > 6)) { return sign | 0x7E; }[m
-[32m+[m[32m    return sign | (uint8_t)(encoded_exp << 3) | (uint8_t)encoded_man;[m
-[32m+[m[32m}[m
-[32m+[m
- /**[m
-  * Converts float32 to brain16.[m
-  *[m
-[1mdiff --git a/ggml/src/ggml-quants.h b/ggml/src/ggml-quants.h[m
-[1mindex 1e266581..5bf16be3 100644[m
-[1m--- a/ggml/src/ggml-quants.h[m
-[1m+++ b/ggml/src/ggml-quants.h[m
-[36m@@ -73,6 +73,8 @@[m [mvoid quantize_row_iq1_bn (const float * GGML_RESTRICT x, void * GGML_RESTRICT y,[m
- void quantize_row_iq1_s  (const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);[m
- void quantize_row_iq1_m  (const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);[m
- [m
-[32m+[m[32mvoid quantize_row_f8_e4m3(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);[m
-[32m+[m
- // Dequantization[m
- void dequantize_row_q2_0(const block_q2_0 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);[m
- void dequantize_row_q4_0(const block_q4_0 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);[m
-[36m@@ -101,6 +103,8 @@[m [mvoid dequantize_row_iq4_xs (const block_iq4_xs  * GGML_RESTRICT x, float * GGML_[m
- void dequantize_row_iq3_s  (const block_iq3_s   * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);[m
- void dequantize_row_iq1_bn (const block_iq1_bn  * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);[m
- [m
-[32m+[m[32mvoid dequantize_row_f8_e4m3(const ggml_fp8_e4m3_t * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);[m
-[32m+[m
- // Dot product[m
- void ggml_vec_dot_q2_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc);[m
- void ggml_vec_dot_q4_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc);[m
-[1mdiff --git a/ggml/src/iqk/iqk_quantize.cpp b/ggml/src/iqk/iqk_quantize.cpp[m
-[1mindex ad2db007..c7857eef 100644[m
-[1m--- a/ggml/src/iqk/iqk_quantize.cpp[m
-[1m+++ b/ggml/src/iqk/iqk_quantize.cpp[m
-[36m@@ -4925,6 +4925,29 @@[m [msize_t quantize_mxfp4_r8(const float * src, void * dst, int64_t nrows, int64_t n[m
-     return nrows * row_size;[m
- }[m
- [m
-[32m+[m[32mvoid quantize_row_f8_e4m3_ref(const float * GGML_RESTRICT x, ggml_fp8_e4m3_t * GGML_RESTRICT y, int64_t k) {[m
-[32m+[m[32m    for (int64_t i = 0; i < k; ++i) {[m
-[32m+[m[32m        y[i].bits = ggml_fp32_to_f8_e4m3(x[i]);[m
-[32m+[m[32m    }[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32mvoid quantize_row_f8_e4m3(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k) {[m
-[32m+[m[32m    quantize_row_f8_e4m3_ref(x, (ggml_fp8_e4m3_t *)y, k);[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32msize_t quantize_f8_e4m3(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrows, int64_t n_per_row, const float * imatrix, const struct quantize_user_data * use_data) {[m
-[32m+[m[32m    GGML_UNUSED(imatrix);[m
-[32m+[m[32m    GGML_UNUSED(use_data);[m
-[32m+[m[32m    quantize_row_f8_e4m3_ref(src, (ggml_fp8_e4m3_t *)dst, nrows * n_per_row);[m
-[32m+[m[32m    return nrows * n_per_row * sizeof(ggml_fp8_e4m3_t);[m
-[32m+[m[32m}[m
-[32m+[m
-[32m+[m[32mvoid dequantize_row_f8_e4m3(const ggml_fp8_e4m3_t * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {[m
-[32m+[m[32m    for (int64_t i = 0; i < k; ++i) {[m
-[32m+[m[32m        y[i] = ggml_f8_e4m3_to_fp32(x[i].bits);[m
-[32m+[m[32m    }[m
-[32m+[m[32m}[m
-[32m+[m
- void dequantize_row_mxfp4_r8(const block_mxfp4_r8 * x, float * y, int64_t k) {[m
-     constexpr int kBlockSize = QK_MXFP4;[m
-     int n_per_row = k/8;[m
-[1mdiff --git a/ggml/src/iqk/iqk_quantize.h b/ggml/src/iqk/iqk_quantize.h[m
-[1mindex 8cb83148..556367c1 100644[m
-[1m--- a/ggml/src/iqk/iqk_quantize.h[m
-[1m+++ b/ggml/src/iqk/iqk_quantize.h[m
-[36m@@ -81,6 +81,11 @@[m [msize_t quantize_mxfp4(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst,[m
- void   dequantize_row_mxfp4(const block_mxfp4 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);[m
- void   vec_dot_mxfp4_q8_0_x4(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc);[m
- [m
-[32m+[m[32mvoid   quantize_row_f8_e4m3_ref(const float * GGML_RESTRICT x, ggml_fp8_e4m3_t * GGML_RESTRICT y, int64_t k);[m
-[32m+[m[32mvoid   quantize_row_f8_e4m3(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);[m
-[32m+[m[32msize_t quantize_f8_e4m3(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrows, int64_t n_per_row, const float * imatrix, const struct quantize_user_data * use_data);[m
-[32m+[m[32mvoid   dequantize_row_f8_e4m3(const ggml_fp8_e4m3_t * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);[m
-[32m+[m
- void   quantize_row_iq2_ks_ref(const float * GGML_RESTRICT x, block_iq2_ks  * GGML_RESTRICT y, int64_t k);[m
- void   quantize_row_iq2_ks(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);[m
- size_t quantize_iq2_ks(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrows, int64_t n_per_row, const float * imatrix, const struct quantize_user_data * use_data);[m
-[1mdiff --git a/include/llama.h b/include/llama.h[m
-[1mindex 928ae875..ddd45de8 100644[m
-[1m--- a/include/llama.h[m
-[1m+++ b/include/llama.h[m
-[36m@@ -192,6 +192,7 @@[m [mextern "C" {[m
-         LLAMA_FTYPE_MOSTLY_Q4_0_4_8      = 34, // except 1d tensors[m
-         LLAMA_FTYPE_MOSTLY_Q4_0_8_8      = 35, // except 1d tensors[m
-         LLAMA_FTYPE_MOSTLY_MXFP4         = 38, // except 1d tensors, 38 to be compatible with mainline[m
-[32m+[m[32m        LLAMA_FTYPE_MOSTLY_F8_E4M3       = 42, // except 1d tensors[m
-         LLAMA_FTYPE_MOSTLY_Q1_0_G128     = 41, // except 1d tensors, 38 to be compatible with mainline[m
-         //[m
-         LLAMA_FTYPE_MOSTLY_Q6_0          = 135, // except 1d tensors[m
-[1mdiff --git a/src/llama-model.cpp b/src/llama-model.cpp[m
-[1mindex c4f5504b..5d7104b4 100644[m
-[1m--- a/src/llama-model.cpp[m
-[1m+++ b/src/llama-model.cpp[m
-[36m@@ -2675,6 +2675,7 @@[m [mstd::string llama_model_ftype_name(llama_ftype ftype) {[m
-         case LLAMA_FTYPE_MOSTLY_Q4_0_4_4: return "Q4_0_4_4";[m
-         case LLAMA_FTYPE_MOSTLY_Q4_0_4_8: return "Q4_0_4_8";[m
-         case LLAMA_FTYPE_MOSTLY_Q4_0_8_8: return "Q4_0_8_8";[m
-[32m+[m[32m        case LLAMA_FTYPE_MOSTLY_F8_E4M3:  return "F8_E4M3 - 8.0 bpw";[m
- [m
-         default: return "unknown, may not work";[m
-     }[m
-[1mdiff --git a/src/llama-quantize.cpp b/src/llama-quantize.cpp[m
-[1mindex c28497cb..e304e79c 100644[m
-[1m--- a/src/llama-quantize.cpp[m
-[1m+++ b/src/llama-quantize.cpp[m
-[36m@@ -1358,6 +1358,7 @@[m [mstatic void llama_model_quantize_internal(const std::string & fname_inp, const s[m
-         case LLAMA_FTYPE_MOSTLY_Q4_0_4_4: default_type = GGML_TYPE_Q4_0_4_4; break;[m
-         case LLAMA_FTYPE_MOSTLY_Q4_0_4_8: default_type = GGML_TYPE_Q4_0_4_8; break;[m
-         case LLAMA_FTYPE_MOSTLY_Q4_0_8_8: default_type = GGML_TYPE_Q4_0_8_8; break;[m
-[32m+[m[32m        case LLAMA_FTYPE_MOSTLY_F8_E4M3:  default_type = GGML_TYPE_F8_E4M3;  break;[m
- [m
-         default: throw std::runtime_error(format("invalid output file type %d\n", ftype));[m
-     }[m
+diff --git a/examples/quantize/llama-quantize-ik.cpp b/examples/quantize/llama-quantize-ik.cpp
+new file mode 100644
+index 00000000..19295029
+--- /dev/null
++++ b/examples/quantize/llama-quantize-ik.cpp
+@@ -0,0 +1,860 @@
++//
++// Copyright (C) 2023-2025 The llama.cpp authors
++// Copyright (C) 2024-2025 Iwan Kawrakow
++// MIT license
++// SPDX-License-Identifier: MIT
++//
++
++#include "common.h"
++#include "llama.h"
++
++#include <cctype>
++#include <cstdio>
++#include <cstring>
++#include <vector>
++#include <string>
++#include <unordered_map>
++#include <fstream>
++#include <sstream>
++#include <cmath>
++
++struct quant_option {
++    std::string name;
++    llama_ftype ftype;
++    std::string desc;
++};
++
++static const std::vector<struct quant_option> QUANT_OPTIONS = {
++    { "Q4_0",     LLAMA_FTYPE_MOSTLY_Q4_0,     " 3.56G, +0.2166 ppl @ LLaMA-v1-7B", },
++    { "Q4_1",     LLAMA_FTYPE_MOSTLY_Q4_1,     " 3.90G, +0.1585 ppl @ LLaMA-v1-7B", },
++    { "Q5_0",     LLAMA_FTYPE_MOSTLY_Q5_0,     " 4.33G, +0.0683 ppl @ LLaMA-v1-7B", },
++    { "Q5_1",     LLAMA_FTYPE_MOSTLY_Q5_1,     " 4.70G, +0.0349 ppl @ LLaMA-v1-7B", },
++    { "Q6_0",     LLAMA_FTYPE_MOSTLY_Q6_0,     " 6.5 bpw quantization",             },
++    { "MXFP4",    LLAMA_FTYPE_MOSTLY_MXFP4,    " 4.25 bpw 4-bit float quantization",},
++    { "MXFP4_R8", LLAMA_FTYPE_MOSTLY_MXFP4_R8, " MXFP4 repacked",                   },
++    { "IQ2_XXS",  LLAMA_FTYPE_MOSTLY_IQ2_XXS,  " 2.06 bpw quantization",            },
++    { "IQ2_XXS_R4",LLAMA_FTYPE_MOSTLY_IQ2_XXS_R4,"IQ2_XXS repacked",            },
++    { "IQ2_XS",   LLAMA_FTYPE_MOSTLY_IQ2_XS,   " 2.31 bpw quantization",            },
++    { "IQ2_XS_R4",LLAMA_FTYPE_MOSTLY_IQ2_XS_R4,"IQ2_XS repacked",            },
++    { "IQ2_S",    LLAMA_FTYPE_MOSTLY_IQ2_S,    " 2.5  bpw quantization",            },
++    { "IQ2_M",    LLAMA_FTYPE_MOSTLY_IQ2_M,    " 2.7  bpw quantization",            },
++    { "IQ2_M_R4", LLAMA_FTYPE_MOSTLY_IQ2_M_R4, " 2.7  bpw quantization",            },
++    { "IQ1_S",    LLAMA_FTYPE_MOSTLY_IQ1_S,    " 1.56 bpw quantization",            },
++    { "IQ1_S_R4", LLAMA_FTYPE_MOSTLY_IQ1_S_R4, " 1.5 bpw quantization",             },
++    { "IQ1_M_R4", LLAMA_FTYPE_MOSTLY_IQ1_M_R4, " 1.75 bpw quantization",            },
++    { "IQ1_M",    LLAMA_FTYPE_MOSTLY_IQ1_M,    " 1.75 bpw quantization",            },
++    { "IQ1_BN",   LLAMA_FTYPE_MOSTLY_IQ1_BN,   " 1.62 bpw quantization (Bitnet)",   },
++    { "IQ2_BN",   LLAMA_FTYPE_MOSTLY_IQ2_BN,   " 2.00 bpw quantization (Bitnet)",   },
++    { "IQ2_BN_R4",LLAMA_FTYPE_MOSTLY_IQ2_BN_R4," 2.00 bpw quantization (Bitnet)",   },
++    { "PQ2_0",    LLAMA_FTYPE_MOSTLY_PQ2_0,    " 2.13 bpw ternary, group-128 (Prism)", },
++    { "PTQ1_0",   LLAMA_FTYPE_MOSTLY_PTQ1_0,   " 1.75 bpw ternary, base-3 (Prism)", },
++    { "PQ2_0_R8", LLAMA_FTYPE_MOSTLY_PQ2_0_R8, " 2.13 bpw ternary, group-128 (Prism)", },
++    { "PTQ1_0_R8",LLAMA_FTYPE_MOSTLY_PTQ1_0_R8," 1.75 bpw ternary, base-3 (Prism)", },
++    { "Q2_K",     LLAMA_FTYPE_MOSTLY_Q2_K,     " 2.63G, +0.6717 ppl @ LLaMA-v1-7B", },
++    { "Q2_K_R4",  LLAMA_FTYPE_MOSTLY_Q2_K_R4,  "Q2_K_S repacked", },
++    { "Q2_K_S",   LLAMA_FTYPE_MOSTLY_Q2_K_S,   " 2.16G, +9.0634 ppl @ LLaMA-v1-7B", },
++    { "IQ3_XXS",  LLAMA_FTYPE_MOSTLY_IQ3_XXS,  " 3.06 bpw quantization",            },
++    { "IQ3_KT",   LLAMA_FTYPE_MOSTLY_IQ3_KT,   " 3.125 bpw trellis quantization",   },
++    { "IQ4_KT",   LLAMA_FTYPE_MOSTLY_IQ4_KT,   " 4.0 bpw trellis quantization",     },
++    { "IQ3_XXS_R4",LLAMA_FTYPE_MOSTLY_IQ3_XXS_R4,"IQ3_XXS repacked",            },
++    { "IQ3_S",    LLAMA_FTYPE_MOSTLY_IQ3_S,    " 3.44 bpw quantization",            },
++    { "IQ3_S_R4", LLAMA_FTYPE_MOSTLY_IQ3_S_R4, "IQ3_S repacked",            },
++    { "IQ3_M",    LLAMA_FTYPE_MOSTLY_IQ3_M,    " 3.66 bpw quantization mix",        },
++    { "Q3_K",     LLAMA_FTYPE_MOSTLY_Q3_K_M,   "alias for Q3_K_M" },
++    { "Q3_K_R4",  LLAMA_FTYPE_MOSTLY_Q3_K_R4,  "Q3_K_S repacked" },
++    { "IQ3_XS",   LLAMA_FTYPE_MOSTLY_IQ3_XS,   " 3.3 bpw quantization"   ,          },
++    { "Q3_K_S",   LLAMA_FTYPE_MOSTLY_Q3_K_S,   " 2.75G, +0.5551 ppl @ LLaMA-v1-7B", },
++    { "Q3_K_M",   LLAMA_FTYPE_MOSTLY_Q3_K_M,   " 3.07G, +0.2496 ppl @ LLaMA-v1-7B", },
++    { "Q3_K_L",   LLAMA_FTYPE_MOSTLY_Q3_K_L,   " 3.35G, +0.1764 ppl @ LLaMA-v1-7B", },
++    { "IQ4_NL",   LLAMA_FTYPE_MOSTLY_IQ4_NL,   " 4.50 bpw non-linear quantization", },
++    { "IQ4_NL_R4",LLAMA_FTYPE_MOSTLY_IQ4_NL_R4," 4.50 bpw non-linear quantization", },
++    { "IQ4_XS_R8",LLAMA_FTYPE_MOSTLY_IQ4_XS_R8," 4.25 bpw non-linear quantization", },
++    { "Q4_0_R8",  LLAMA_FTYPE_MOSTLY_Q4_0_R8,  " 4.50 bpw quantization",            },
++    { "Q5_0_R4",  LLAMA_FTYPE_MOSTLY_Q5_0_R4,  " 5.50 bpw quantization",            },
++    { "Q6_0_R4",  LLAMA_FTYPE_MOSTLY_Q6_0_R4,  " 6.50 bpw quantization",            },
++    { "Q8_0_R8",  LLAMA_FTYPE_MOSTLY_Q8_0_R8,  " 8.50 bpw quantization",            },
++    { "Q8_KV",    LLAMA_FTYPE_MOSTLY_Q8_KV,    " 8.00 bpw quantization",            },
++    { "IQ4_XS",   LLAMA_FTYPE_MOSTLY_IQ4_XS,   " 4.25 bpw non-linear quantization", },
++    { "IQ4_KS",   LLAMA_FTYPE_MOSTLY_IQ4_KS,   " 4.25 bpw non-linear quantization", },
++    { "IQ4_KS_R4",LLAMA_FTYPE_MOSTLY_IQ4_KS_R4,"IQ4_KS 4-row repacked", },
++    { "IQ4_KS_R16",LLAMA_FTYPE_MOSTLY_IQ4_KS_R16,"IQ4_KS 16-row repacked", },
++    { "IQ5_KS_R16",LLAMA_FTYPE_MOSTLY_IQ5_KS_R16,"IQ5_KS 16-row repacked", },
++    { "IQ3_KS_R16",LLAMA_FTYPE_MOSTLY_IQ3_KS_R16,"IQ3_KS 16-row repacked", },
++    { "IQ5_KS_R4",LLAMA_FTYPE_MOSTLY_IQ5_KS_R4,"IQ5_KS repacked", },
++    { "IQ4_KSS",  LLAMA_FTYPE_MOSTLY_IQ4_KSS,  " 4.0 bpw non-linear quantization",  },
++    { "IQ5_KS",   LLAMA_FTYPE_MOSTLY_IQ5_KS,   " 5.25 bpw non-linear quantization", },
++    { "IQ2_K",    LLAMA_FTYPE_MOSTLY_IQ2_K,    " 2.375 bpw non-linear quantization",},
++    { "IQ2_K_R4", LLAMA_FTYPE_MOSTLY_IQ2_K_R4, "IQ2_K repacked",},
++    { "IQ2_KS",   LLAMA_FTYPE_MOSTLY_IQ2_KS,   " 2.1875 bpw non-linear quantization",},
++    { "IQ1_KT",   LLAMA_FTYPE_MOSTLY_IQ1_KT,   " 1.75 bpw trellis quantization",   },
++    { "IQ2_KT",   LLAMA_FTYPE_MOSTLY_IQ2_KT,   " 2.125 bpw trellis quantization",   },
++    { "IQ2_KL",   LLAMA_FTYPE_MOSTLY_IQ2_KL,   " 2.69 bpw non-linear quantization", },
++    { "IQ3_KS",   LLAMA_FTYPE_MOSTLY_IQ3_KS,   " 3.19 bpw non-linear quantization", },
++    { "IQ3_K",    LLAMA_FTYPE_MOSTLY_IQ3_K,    " 3.44 bpw non-linear quantization", },
++    { "IQ3_K_R4", LLAMA_FTYPE_MOSTLY_IQ3_K_R4, "IQ3_K repacked", },
++    { "IQ3_KL",   LLAMA_FTYPE_MOSTLY_IQ3_KL,   " 4 bpw non-linear quantization mix",},
++    { "IQ4_K",    LLAMA_FTYPE_MOSTLY_IQ4_K,    " 4.5 bpw non-linear quantization",  },
++    { "IQ4_K_R4", LLAMA_FTYPE_MOSTLY_IQ4_K_R4, "IQ4_K repacked",  },
++    { "IQ5_K",    LLAMA_FTYPE_MOSTLY_IQ5_K,    " 5.5 bpw non-linear quantization",  },
++    { "IQ5_K_R4", LLAMA_FTYPE_MOSTLY_IQ5_K_R4, "IQ5_K repacked",  },
++    { "IQ6_K",    LLAMA_FTYPE_MOSTLY_IQ6_K,    " 6.6 bpw non-linear quantization",  },
++    { "Q4_K",     LLAMA_FTYPE_MOSTLY_Q4_K_M,   "alias for Q4_K_M", },
++    { "Q4_K_R4",  LLAMA_FTYPE_MOSTLY_Q4_K_R4,  "Q4_K_S repacked", },
++    { "Q4_K_S",   LLAMA_FTYPE_MOSTLY_Q4_K_S,   " 3.59G, +0.0992 ppl @ LLaMA-v1-7B", },
++    { "Q4_K_M",   LLAMA_FTYPE_MOSTLY_Q4_K_M,   " 3.80G, +0.0532 ppl @ LLaMA-v1-7B", },
++    { "Q5_K",     LLAMA_FTYPE_MOSTLY_Q5_K_M,   "alias for Q5_K_M", },
++    { "Q5_K_R4",  LLAMA_FTYPE_MOSTLY_Q5_K_R4,  "Q5_K_S repacked", },
++    { "Q5_K_S",   LLAMA_FTYPE_MOSTLY_Q5_K_S,   " 4.33G, +0.0400 ppl @ LLaMA-v1-7B", },
++    { "Q5_K_M",   LLAMA_FTYPE_MOSTLY_Q5_K_M,   " 4.45G, +0.0122 ppl @ LLaMA-v1-7B", },
++    { "Q6_K",     LLAMA_FTYPE_MOSTLY_Q6_K,     " 5.15G, +0.0008 ppl @ LLaMA-v1-7B", },
++    { "Q6_K_R4",  LLAMA_FTYPE_MOSTLY_Q6_K_R4,  "Q6_K repacked", },
++    { "Q8_K_R8",  LLAMA_FTYPE_MOSTLY_Q8_K_R8,  "Q8_K repacked", },
++    { "Q8_K_R16", LLAMA_FTYPE_MOSTLY_Q8_K_R16, "Q8_K repacked", },
++    { "Q8_KV_R8", LLAMA_FTYPE_MOSTLY_Q8_KV_R8, "Q8_KV repacked", },
++    { "Q8_0",     LLAMA_FTYPE_MOSTLY_Q8_0,     " 6.70G, +0.0004 ppl @ LLaMA-v1-7B", },
++    { "Q4_0_4_4", LLAMA_FTYPE_MOSTLY_Q4_0_4_4, " 4.34G, +0.4685 ppl @ Llama-3-8B",  },
++    { "Q4_0_4_8", LLAMA_FTYPE_MOSTLY_Q4_0_4_8, " 4.34G, +0.4685 ppl @ Llama-3-8B",  },
++    { "Q4_0_8_8", LLAMA_FTYPE_MOSTLY_Q4_0_8_8, " 4.34G, +0.4685 ppl @ Llama-3-8B",  },
++    { "F16",      LLAMA_FTYPE_MOSTLY_F16,      "14.00G, -0.0020 ppl @ Mistral-7B", },
++    { "BF16",     LLAMA_FTYPE_MOSTLY_BF16,     "14.00G, -0.0050 ppl @ Mistral-7B", },
++    { "BF16_R16", LLAMA_FTYPE_MOSTLY_BF16_R16, "14.00G, -0.0050 ppl @ Mistral-7B", },
++    { "F32",      LLAMA_FTYPE_ALL_F32,         "26.00G              @ 7B", },
++    // Note: Ensure COPY comes after F32 to avoid ftype 0 from matching.
++    { "COPY",     LLAMA_FTYPE_ALL_F32,         "only copy tensors, no quantizing",  },
++};
++
++static const char * const LLM_KV_QUANTIZE_IMATRIX_FILE       = "quantize.imatrix.file";
++static const char * const LLM_KV_QUANTIZE_IMATRIX_DATASET    = "quantize.imatrix.dataset";
++static const char * const LLM_KV_QUANTIZE_IMATRIX_N_ENTRIES  = "quantize.imatrix.entries_count";
++static const char * const LLM_KV_QUANTIZE_IMATRIX_N_CHUNKS   = "quantize.imatrix.chunks_count";
++
++static bool try_parse_ftype(const std::string & ftype_str_in, llama_ftype & ftype, std::string & ftype_str_out) {
++    std::string ftype_str;
++
++    for (auto ch : ftype_str_in) {
++        ftype_str.push_back(std::toupper(ch));
++    }
++    for (auto & it : QUANT_OPTIONS) {
++        if (it.name == ftype_str) {
++            ftype = it.ftype;
++            ftype_str_out = it.name;
++            return true;
++        }
++    }
++    try {
++        int ftype_int = std::stoi(ftype_str);
++        for (auto & it : QUANT_OPTIONS) {
++            if (it.ftype == ftype_int) {
++                ftype = it.ftype;
++                ftype_str_out = it.name;
++                return true;
++            }
++        }
++    }
++    catch (...) {
++        // stoi failed
++    }
++    return false;
++}
++
++// usage:
++//  ./llama-quantize [--allow-requantize] [--leave-output-tensor] [--pure] models/llama/ggml-model.gguf [models/llama/ggml-model-quant.gguf] type [nthreads]
++//
++[[noreturn]]
++static void usage(const char * executable) {
++    printf("usage: %s [--help] [--allow-requantize] [--leave-output-tensor] [--pure] [--imatrix] [--hide-imatrix] [--ignore-imatrix-rules] [--dry-run] [--slab-size] [--cuda-quantize] [-dev/--device] [-ts/--tensor-split] [--include-weights] [--exclude-weights] [--output-tensor-type] [--token-embedding-type] [--per-layer-token-embedding-type] [--extra-output-tensor] [--fudge-factors] [--ffn-gate-inp-type] [--attn-q-type] [--attn-k-type] [--attn-v-type] [--attn-qkv-type] [--attn-output-type] [--ffn-gate-type] [--ffn-down-type] [--ffn-up-type] [--repack] [--repack-pattern] [--keep-split] [--partial-requant] [--override-kv] model-f32.gguf [model-quant.gguf] type [nthreads]\n\n", executable);
++    printf("  --allow-requantize: Allows requantizing tensors that have already been quantized. Warning: This can severely reduce quality compared to quantizing from 16bit or 32bit\n");
++    printf("  --leave-output-tensor: Will leave output.weight un(re)quantized. Increases model size but may also increase quality, especially when requantizing\n");
++    printf("  --pure: Disable k-quant mixtures and quantize all tensors to the same type\n");
++    printf("  --imatrix file_name: use data in file_name as importance matrix for quant optimizations\n");
++    printf("  --hide-imatrix: do not store imatrix details in the quantized model\n");
++    printf("  --ignore-imatrix-rules: ignore importance matrix rules when quantizing\n");
++    printf("  --dry-run: show what would be quantized without actually writing the output file\n");
++    printf("  --slab-size N: process tensors larger than N MiB of f32 in slabs of up to N MiB, or of one expert slice or row group if that is larger (default: 1024, 0 = never)\n");
++    printf("  --cuda-quantize: quantize IQ4_KT, IQ3_KT, IQ2_KT, IQ1_KT, IQ3_KS, IQ4_KS, IQ4_KS_R4, IQ4_KS_R16, IQ5_KS, and IQ5_KS_R4 tensors on a CUDA device; other types use the CPU\n");
++    printf("  -dev DEVICES, --device DEVICES: CUDA device(s) for --cuda-quantize (default CUDA0; 2+ devices = row-split, e.g. -dev CUDA0,CUDA1)\n");
++    printf("  -ts SPLIT, --tensor-split SPLIT: row-split shares for 2+ GPUs (e.g. -ts 3,3,2; equal when absent; requires -dev/--device with 2+ CUDA devices)\n");
++    printf("  --include-weights tensor_name: use importance matrix for this/these tensor(s)\n");
++    printf("  --exclude-weights tensor_name: use importance matrix for this/these tensor(s)\n");
++    printf("  --output-tensor-type ggml_type: use this ggml_type for the output.weight tensor.\n");
++    printf("  --token-embedding-type ggml_type: use this ggml_type for the token_embd.weight tensor.\n");
++    printf("  --per-layer-token-embedding-type ggml_type: use this ggml_type for all per-layer token_embd.weight tensors.\n\n");
++    printf("  --extra-output-tensor ggml_type: requantize and add output tensor of that type.\n");
++    printf("  --ffn-gate-inp-type ggml_type: use this ggml_type for the ffn_gate_inp tensors.\n\n");
++    printf("  --custom-q regex1=type1,regex2=type2...: use this to specify custom quantization type rules.\n\n");
++    printf("  --repack Repack all tensors to the corresponding _r4/8 variant if available.\n\n");
++    printf("  --repack-pattern Comma separated list of regexs to use for matching tensor names to be repacked.\n\n");
++    printf("  --symmetric-q40  Use [-7:7] range for Q4_0 quantization (turns off imatrix)\n\n");
++    printf("  --slow-iq2ks Use the original very slow IQ2_KS quantization method.\n\n");
++    printf("  --fudge-factors type1=ff1,type2=ff2... Apply scale fudge factors during quantization as specified by type=fudge-factor.\n\n");
++    printf("Additional specific tensor quantization types used in the custom quant scheme 'CQS (default is Q2_K):\n");
++    printf("      --attn-q-type ggml_type: use this ggml_type for the attn_q.weight tensor.\n");
++    printf("      --attn-k-type ggml_type: use this ggml_type for the attn_k.weight tensor.\n");
++    printf("      --attn-v-type ggml_type: use this ggml_type for the attn_v.weight tensor.\n");
++    printf("      --attn-qkv-type ggml_type: use this ggml_type for the attn_qkv.weight tensor.\n");
++    printf("      --attn-output-type ggml_type: use this ggml_type for the attn_output.weight tensor.\n");
++    printf("      --ffn-gate-type ggml_type: use this ggml_type for the ffn_gate tensor.\n");
++    printf("      --ffn-down-type ggml_type: use this ggml_type for the ffn_down tensor.\n");
++    printf("      --ffn-up-type ggml_type: use this ggml_type for the ffn_up tensor.\n\n");
++    printf("  --keep-split: will generate quantized model in the same shards as input\n");
++    printf("  --partial-requant: quantize only missing split files in the split quantized .gguf destination directory\n");
++    printf("  --override-kv KEY=TYPE:VALUE\n");
++    printf("      Advanced option to override model metadata by key in the quantized model. May be specified multiple times.\n\n");
++    printf("Note: --include-weights and --exclude-weights cannot be used together\n");
++    printf("Note: The token embeddings tensor is loaded in system RAM, even in case of full GPU/VRAM offload.\n");
++    printf("Note: The recommended type for the output tensor is q6_K for the ffn types > iq3_xxs and < q8_0.\n\n");
++    printf("Note for the Custom Quant Scheme FTYPE:\n");
++    printf("    Write the specific tensor legacy quants as qN_N, the K-Quants as qN_K, the IQ-Quants as iqN_xx.\n");
++    printf("    Usually, attn-q-type can be one type below the chosen ffn type, and attn-v-type should be one type above.\n");
++    printf("    attn-qkv-type replaces the types attn-q, attn-k and attn-v on some models.\n");
++    //TODO: - eventually - harmonize the CAPS writing of the FTYPEs, and non CAPS writing of the GGML_TYPEs.
++    printf("\nAllowed quantization types:\n");
++    for (auto & it : QUANT_OPTIONS) {
++        if (it.name != "COPY") {
++            printf("  %2d  or  ", it.ftype);
++        } else {
++            printf("          ");
++        }
++        printf("%-7s : %s\n", it.name.c_str(), it.desc.c_str());
++    }
++    exit(1);
++}
++
++static int load_imatrix(const std::string & imatrix_file, std::string & imatrix_dataset, std::unordered_map<std::string, std::vector<float>> & imatrix_data) {
++    std::ifstream in(imatrix_file.c_str(), std::ios::binary);
++    if (!in) {
++        printf("%s: failed to open %s\n",__func__, imatrix_file.c_str());
++        exit(1);
++    }
++    int n_entries;
++    in.read((char *)&n_entries, sizeof(n_entries));
++    if (in.fail() || n_entries < 1) {
++        printf("%s: no data in file %s\n", __func__, imatrix_file.c_str());
++        exit(1);
++    }
++    for (int i = 0; i < n_entries; ++i) {
++        int len; in.read((char *)&len, sizeof(len));
++        std::vector<char> name_as_vec(len+1);
++        in.read((char *)name_as_vec.data(), len);
++        if (in.fail()) {
++            printf("%s: failed reading name for entry %d from %s\n", __func__, i+1, imatrix_file.c_str());
++            exit(1);
++        }
++        name_as_vec[len] = 0;
++        std::string name{name_as_vec.data()};
++        auto & e = imatrix_data[name];
++        int ncall;
++        in.read((char *)&ncall, sizeof(ncall));
++        int nval;
++        in.read((char *)&nval, sizeof(nval));
++        if (in.fail() || nval < 1) {
++            printf("%s: failed reading number of values for entry %d\n", __func__, i);
++            imatrix_data = {};
++            exit(1);
++        }
++        e.resize(nval);
++        in.read((char *)e.data(), nval*sizeof(float));
++        if (in.fail()) {
++            printf("%s: failed reading data for entry %d\n", __func__, i);
++            imatrix_data = {};
++            exit(1);
++        }
++        if (ncall > 0) {
++            for (auto& v : e) v /= ncall;
++        }
++
++        if (getenv("LLAMA_TRACE")) {
++            printf("%s: loaded data (size = %6d, ncall = %6d) for '%s'\n", __func__, int(e.size()), ncall, name.c_str());
++        }
++    }
++
++    // latest imatrix version contains the dataset filename at the end of the file
++    int m_last_call = 0;
++    if (in.peek() != EOF) {
++        in.read((char *)&m_last_call, sizeof(m_last_call));
++        int dataset_len;
++        in.read((char *)&dataset_len, sizeof(dataset_len));
++        std::vector<char> dataset_as_vec(dataset_len);
++        in.read(dataset_as_vec.data(), dataset_len);
++        imatrix_dataset.assign(dataset_as_vec.begin(), dataset_as_vec.end());
++        printf("%s: imatrix dataset='%s'\n", __func__, imatrix_dataset.c_str());
++    }
++    printf("%s: loaded %d importance matrix entries from %s computed on %d chunks\n", __func__, int(imatrix_data.size()), imatrix_file.c_str(), m_last_call);
++    return m_last_call;
++}
++
++static int prepare_imatrix(const std::string & imatrix_file,
++        std::string & imatrix_dataset,
++        const std::vector<std::string> & included_weights,
++        const std::vector<std::string> & excluded_weights,
++        std::unordered_map<std::string, std::vector<float>> & imatrix_data) {
++    int m_last_call = -1;
++    if (!imatrix_file.empty()) {
++        m_last_call = load_imatrix(imatrix_file, imatrix_dataset, imatrix_data);
++    }
++    if (imatrix_data.empty()) {
++        return m_last_call;
++    }
++    if (!excluded_weights.empty()) {
++        for (auto& name : excluded_weights) {
++            for (auto it = imatrix_data.begin(); it != imatrix_data.end(); ) {
++                auto pos = it->first.find(name);
++                if (pos != std::string::npos) it = imatrix_data.erase(it);
++                else ++it;
++            }
++        }
++    }
++    if (!included_weights.empty()) {
++        std::unordered_map<std::string, std::vector<float>> tmp;
++        for (auto& name : included_weights) {
++            for (auto& e : imatrix_data) {
++                auto pos = e.first.find(name);
++                if (pos != std::string::npos) {
++                    tmp.emplace(std::move(e));
++                }
++            }
++        }
++        imatrix_data = std::move(tmp);
++    }
++    if (!imatrix_data.empty()) {
++        printf("%s: have %d importance matrix entries\n", __func__, int(imatrix_data.size()));
++    }
++    return m_last_call;
++}
++
++static ggml_type parse_ggml_type(const char * arg) {
++    ggml_type result = GGML_TYPE_COUNT;
++    std::string arg_lower{arg};
++    for (auto & c : arg_lower) c = std::tolower(c);
++    for (int j = 0; j < GGML_TYPE_COUNT; ++j) {
++        auto type = ggml_type(j);
++        const auto * name = ggml_type_name(type);
++        if (name) {
++            if (strcmp(arg, name) == 0) return type;
++            std::string name_lower{name};
++            for (auto & c : name_lower) c = std::tolower(c);
++            if (name_lower == arg_lower) return type;
++        }
++    }
++    return result;
++}
++
++using CustomQ = std::pair<std::string, ggml_type>;
++
++static bool parse_custom_quants(const std::string& arg, std::vector<CustomQ>& custom_quants) {
++    for (const auto & item : string_split<std::string>(arg, ',')) {
++        auto pos = item.find('=');
++        if (pos == std::string::npos) {
++            fprintf(stderr, "Invalid custom quantization input %s\n", arg.c_str());
++            return false;
++        }
++        auto pattern = item.substr(0, pos);
++        auto type_as_string = item.substr(pos + 1);
++        auto type = parse_ggml_type(type_as_string.c_str());
++        if (type == GGML_TYPE_COUNT) {
++            fprintf(stderr, "Invalid quantization type '%s' in custom quantization input %s\n", type_as_string.c_str(), item.c_str());
++            return false;
++        }
++        printf("Adding custom rule %s -> %s\n", pattern.c_str(), ggml_type_name(type));
++        custom_quants.emplace_back(std::move(pattern), type);
++    }
++    return true;
++}
++
++// Parse a common-style CUDA list (CUDA0,CUDA1, bare index ok) into ordinals.
++static bool parse_cuda_device_list(const std::string & arg, std::vector<int> & devs) {
++    std::vector<int> out;
++    for (const auto & item : string_split<std::string>(arg, ',')) {
++        size_t beg = item.find_first_not_of(" \t");
++        size_t end = item.find_last_not_of(" \t");
++        if (beg == std::string::npos) {
++            return false;
++        }
++        std::string first = item.substr(beg, end - beg + 1);
++        std::string digits = first;
++        if (first.size() > 4 && (first.compare(0, 4, "CUDA") == 0 || first.compare(0, 4, "cuda") == 0)) {
++            digits = first.substr(4);
++        }
++        if (digits.empty()) {
++            return false;
++        }
++        for (char c : digits) {
++            if (!isdigit((unsigned char) c)) {
++                return false;
++            }
++        }
++        try {
++            out.push_back(std::stoi(digits));
++        }
++        catch (const std::exception &) {
++            return false;
++        }
++    }
++    if (out.empty()) {
++        return false;
++    }
++    devs = std::move(out);
++    return true;
++}
++
++static bool parse_fudge_factors(const std::string & arg, std::unordered_map<ggml_type, float> & factors) {
++    for (const auto & item : string_split<std::string>(arg, ',')) {
++        auto pos = item.find('=');
++        if (pos == std::string::npos) {
++            fprintf(stderr, "Invalid fudge factor input %s\n", arg.c_str());
++            return false;
++        }
++        auto type_as_string = item.substr(0, pos);
++        auto value_as_string = item.substr(pos + 1);
++        auto type = parse_ggml_type(type_as_string.c_str());
++        if (type == GGML_TYPE_COUNT) {
++            fprintf(stderr, "Invalid quantization type '%s' in fudge factor input %s\n", type_as_string.c_str(), item.c_str());
++            return false;
++        }
++        std::istringstream stream(value_as_string);
++        float val; stream >> val;
++        if (stream.fail()) {
++            fprintf(stderr, "Invalid fudge factor '%s' in fudge factor input %s\n", value_as_string.c_str(), item.c_str());
++            return false;
++        }
++        factors[type] = val;
++        printf("Adding scale fudge factor = %g for type %s\n", val, ggml_type_name(type));
++    }
++    return true;
++}
++
++int main(int argc, char ** argv) {
++    if (argc < 3) {
++        usage(argv[0]);
++    }
++
++    llama_model_quantize_params params = llama_model_quantize_default_params();
++
++    int arg_idx = 1;
++    std::string imatrix_file;
++    std::vector<std::string> included_weights, excluded_weights;
++    std::vector<llama_model_kv_override> kv_overrides;
++    std::vector<CustomQ> custom_quants;
++    quantize_user_data user_data = { false, false };
++    params.user_data = &user_data;
++
++    std::vector<std::string> repack_patterns;
++
++    std::unordered_map<ggml_type, float> fudge_factors;
++
++    bool hide_imatrix = false;
++
++    std::vector<int> cuda_devs;
++    std::vector<float> cuda_ts;
++    bool have_cuda_ts = false;
++
++    for (; arg_idx < argc && (strncmp(argv[arg_idx], "--", 2) == 0 || strcmp(argv[arg_idx], "-dev") == 0 || strcmp(argv[arg_idx], "-ts") == 0); arg_idx++) {
++        if (strcmp(argv[arg_idx], "--leave-output-tensor") == 0) {
++            params.quantize_output_tensor = false;
++        } else if (strcmp(argv[arg_idx], "--ignore-imatrix-rules") == 0) {
++            params.ignore_imatrix_rules = true;
++        } else if (strcmp(argv[arg_idx], "--dry-run") == 0) {
++            params.dry_run = true;
++        } else if (strcmp(argv[arg_idx], "--slab-size") == 0) {
++            if (arg_idx < argc-1) {
++                try {
++                    params.slab_size = std::stoull(argv[++arg_idx]) << 20;
++                }
++                catch (const std::exception & e) {
++                    fprintf(stderr, "%s: invalid slab size '%s' (%s)\n", __func__, argv[arg_idx], e.what());
++                    return 1;
++                }
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--cuda-quantize") == 0) {
++            params.cuda_quantize = true;
++        } else if (strcmp(argv[arg_idx], "--device") == 0 || strcmp(argv[arg_idx], "-dev") == 0) {
++            if (arg_idx < argc-1) {
++                std::vector<int> devs;
++                if (!parse_cuda_device_list(argv[++arg_idx], devs)) {
++                    fprintf(stderr, "%s: invalid CUDA device '%s' (expected CUDA<N> list, e.g. CUDA0,CUDA1, or bare index)\n", __func__, argv[arg_idx]);
++                    return 1;
++                }
++                cuda_devs = std::move(devs);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--tensor-split") == 0 || strcmp(argv[arg_idx], "-ts") == 0) {
++            if (arg_idx < argc-1) {
++                std::vector<float> ts;
++                for (const auto & item : string_split<std::string>(argv[++arg_idx], ',')) {
++                    try {
++                        const float v = std::stof(item);
++                        if (!std::isfinite(v) || v <= 0.0f) {
++                            throw std::runtime_error("non-positive");
++                        }
++                        ts.push_back(v);
++                    }
++                    catch (const std::exception &) {
++                        fprintf(stderr, "%s: invalid tensor-split entry '%s' in '%s' (expected positive numbers, e.g. -ts 3,3,2)\n", __func__, item.c_str(), argv[arg_idx]);
++                        return 1;
++                    }
++                }
++                if (ts.empty()) {
++                    fprintf(stderr, "%s: empty tensor-split list '%s'\n", __func__, argv[arg_idx]);
++                    return 1;
++                }
++                cuda_ts = std::move(ts);
++                have_cuda_ts = true;
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--symmetric-q40") == 0) {
++            user_data.symmetric_q4_0 = true;
++        } else if (strcmp(argv[arg_idx], "--slow-iq2ks") == 0) {
++            user_data.slow_iq2_ks = true;
++        } else if (strcmp(argv[arg_idx], "--repack") == 0) {
++            params.only_repack = true;
++        } else if (strcmp(argv[arg_idx], "--repack-pattern") == 0) {
++            if (arg_idx < argc-1) {
++                auto p = string_split(argv[++arg_idx], ',');
++                repack_patterns.insert(repack_patterns.end(), p.begin(), p.end());
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--output-tensor-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.output_tensor_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--extra-output-tensor") == 0) {
++            if (arg_idx < argc-1) {
++                params.extra_output_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--token-embedding-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.token_embedding_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--per-layer-token-embedding-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.per_layer_token_embedding_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--ffn-gate-inp-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.ffn_gate_inp_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--attn-q-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.attn_q_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--attn-k-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.attn_k_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--attn-v-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.attn_v_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--attn-qkv-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.attn_qkv_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--attn-output-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.attn_output_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--ffn-gate-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.ffn_gate_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--ffn-down-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.ffn_down_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--ffn-up-type") == 0) {
++            if (arg_idx < argc-1) {
++                params.ffn_up_type = parse_ggml_type(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--override-kv") == 0) {
++            if (arg_idx == argc-1 || !string_parse_kv_override(argv[++arg_idx], kv_overrides)) {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--custom-q") == 0) {
++            if (arg_idx == argc-1 || !parse_custom_quants(argv[++arg_idx], custom_quants)) {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--fudge-factors") == 0) {
++            if (arg_idx == argc-1 || !parse_fudge_factors(argv[++arg_idx], fudge_factors)) {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--allow-requantize") == 0) {
++            params.allow_requantize = true;
++        } else if (strcmp(argv[arg_idx], "--pure") == 0) {
++            params.pure = true;
++        } else if (strcmp(argv[arg_idx], "--imatrix") == 0) {
++            if (arg_idx < argc-1) {
++                imatrix_file = argv[++arg_idx];
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--hide-imatrix") == 0) {
++            hide_imatrix = true;
++        } else if (strcmp(argv[arg_idx], "--include-weights") == 0) {
++            if (arg_idx < argc-1) {
++                included_weights.emplace_back(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--exclude-weights") == 0) {
++            if (arg_idx < argc-1) {
++                excluded_weights.emplace_back(argv[++arg_idx]);
++            } else {
++                usage(argv[0]);
++            }
++        } else if (strcmp(argv[arg_idx], "--keep-split") == 0) {
++            params.keep_split = true;
++        } else if (strcmp(argv[arg_idx], "--partial-requant") == 0) {
++            params.partial_requant = true;
++        } else {
++            usage(argv[0]);
++        }
++    }
++
++    if (!fudge_factors.empty()) {
++        for (auto [type, factor] : fudge_factors) {
++            ggml_set_quantize_fudge_factor(type, factor);
++        }
++    }
++
++    // 1 device = mono, otherwise N-way shares (equal when -ts is absent).
++    if (!cuda_devs.empty() || have_cuda_ts) {
++        if (cuda_devs.empty()) {
++            fprintf(stderr, "%s: -ts/--tensor-split needs -dev/--device with at least 2 CUDA devices\n", __func__);
++            return 1;
++        }
++        if (have_cuda_ts && cuda_ts.size() != cuda_devs.size()) {
++            fprintf(stderr, "%s: tensor-split entries (%zu) must match device count (%zu)\n", __func__, cuda_ts.size(), cuda_devs.size());
++            return 1;
++        }
++        if (cuda_devs.size() > 16) {
++            fprintf(stderr, "%s: at most 16 CUDA devices supported, got %zu\n", __func__, cuda_devs.size());
++            return 1;
++        }
++        params.cuda_quantize_device = cuda_devs[0];
++        if (cuda_devs.size() > 1) {
++            params.cuda_quantize_n_devices = static_cast<int>(cuda_devs.size());
++            float total = 0.0f;
++            for (size_t i = 0; i < cuda_devs.size(); ++i) {
++                total += have_cuda_ts ? cuda_ts[i] : 1.0f;
++            }
++            for (size_t i = 0; i < cuda_devs.size(); ++i) {
++                params.cuda_quantize_devices[i] = cuda_devs[i];
++                params.cuda_quantize_split[i] = (have_cuda_ts ? cuda_ts[i] : 1.0f)/total;
++            }
++        }
++    }
++
++    if (!repack_patterns.empty()) {
++        params.repack_pattern = &repack_patterns;
++    }
++
++    if (argc - arg_idx < 2) {
++        printf("%s: bad arguments\n", argv[0]);
++        usage(argv[0]);
++    }
++    if (!included_weights.empty() && !excluded_weights.empty()) {
++        usage(argv[0]);
++    }
++
++    std::string imatrix_dataset;
++    std::unordered_map<std::string, std::vector<float>> imatrix_data;
++    int m_last_call = prepare_imatrix(imatrix_file, imatrix_dataset, included_weights, excluded_weights, imatrix_data);
++    if (!imatrix_data.empty()) {
++        params.imatrix = &imatrix_data;
++        {
++            llama_model_kv_override kvo;
++            std::strcpy(kvo.key, LLM_KV_QUANTIZE_IMATRIX_FILE);
++            kvo.tag = LLAMA_KV_OVERRIDE_TYPE_STR;
++            if (hide_imatrix) {
++                strncpy(kvo.val_str, "top_secret", 127);
++            } else {
++                strncpy(kvo.val_str, imatrix_file.c_str(), 127);
++            }
++            kvo.val_str[127] = '\0';
++            kv_overrides.emplace_back(std::move(kvo));
++        }
++        if (!imatrix_dataset.empty()) {
++            llama_model_kv_override kvo;
++            std::strcpy(kvo.key, LLM_KV_QUANTIZE_IMATRIX_DATASET);
++            kvo.tag = LLAMA_KV_OVERRIDE_TYPE_STR;
++            if (hide_imatrix) {
++                strncpy(kvo.val_str, "top_secret", 127);
++            } else {
++                strncpy(kvo.val_str, imatrix_dataset.c_str(), 127);
++            }
++            kvo.val_str[127] = '\0';
++            kv_overrides.emplace_back(std::move(kvo));
++        }
++
++        {
++            llama_model_kv_override kvo;
++            std::strcpy(kvo.key, LLM_KV_QUANTIZE_IMATRIX_N_ENTRIES);
++            kvo.tag = LLAMA_KV_OVERRIDE_TYPE_INT;
++            if (hide_imatrix) {
++                kvo.val_i64 = 0;
++            } else {
++                kvo.val_i64 = imatrix_data.size();
++            }
++            kv_overrides.emplace_back(std::move(kvo));
++        }
++
++        if (m_last_call > 0) {
++            llama_model_kv_override kvo;
++            std::strcpy(kvo.key, LLM_KV_QUANTIZE_IMATRIX_N_CHUNKS);
++            kvo.tag = LLAMA_KV_OVERRIDE_TYPE_INT;
++            if (hide_imatrix) {
++                kvo.val_i64 = 0;
++            } else {
++                kvo.val_i64 = m_last_call;
++            }
++            kv_overrides.emplace_back(std::move(kvo));
++        }
++    }
++    if (!kv_overrides.empty()) {
++        kv_overrides.emplace_back();
++        kv_overrides.back().key[0] = 0;
++        params.kv_overrides = &kv_overrides;
++    }
++    if (!custom_quants.empty()) {
++        params.custom_quants = &custom_quants;
++    }
++
++    llama_backend_init();
++
++    // parse command line arguments
++    const std::string fname_inp = argv[arg_idx];
++    arg_idx++;
++    std::string fname_out;
++
++    std::string ftype_str;
++    std::string suffix = ".gguf";
++    if (try_parse_ftype(argv[arg_idx], params.ftype, ftype_str)) {
++        std::string fpath;
++        const size_t pos = fname_inp.find_last_of("/\\");
++        if (pos != std::string::npos) {
++            fpath = fname_inp.substr(0, pos + 1);
++        }
++
++        // export as [inp path]/ggml-model-[ftype]. Only add extension if there is no splitting
++        fname_out = fpath + "ggml-model-" + ftype_str;
++        if (!params.keep_split) {
++            fname_out += suffix;
++        }
++        arg_idx++;
++        if (ftype_str == "COPY") {
++            params.only_copy = true;
++        }
++    } else {
++        fname_out = argv[arg_idx];
++        if (params.keep_split && fname_out.find(suffix) != std::string::npos) {
++            fname_out = fname_out.substr(0, fname_out.length() - suffix.length());
++        }
++        arg_idx++;
++
++        if (argc <= arg_idx) {
++            fprintf(stderr, "%s: missing ftype\n", __func__);
++            return 1;
++        }
++        if (!try_parse_ftype(argv[arg_idx], params.ftype, ftype_str)) {
++            fprintf(stderr, "%s: invalid ftype '%s'\n", __func__, argv[arg_idx]);
++            return 1;
++        }
++        if (ftype_str == "COPY") {
++           params.only_copy = true;
++        }
++        arg_idx++;
++    }
++
++    // parse nthreads
++    if (argc > arg_idx) {
++        try {
++            params.nthread = std::stoi(argv[arg_idx]);
++        }
++        catch (const std::exception & e) {
++            fprintf(stderr, "%s: invalid nthread '%s' (%s)\n", __func__, argv[arg_idx], e.what());
++            return 1;
++        }
++    }
++
++    if (!params.ignore_imatrix_rules && imatrix_data.empty() &&
++        (params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_XS || params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_XXS ||
++         params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_S  || params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_XXS_R4 ||
++         params.ftype == LLAMA_FTYPE_MOSTLY_Q2_K_S || params.ftype == LLAMA_FTYPE_MOSTLY_IQ2_XS_R4 ||
++         params.ftype == LLAMA_FTYPE_MOSTLY_IQ1_S  ||
++         params.ftype == LLAMA_FTYPE_MOSTLY_IQ1_S_R4 ||
++         params.ftype == LLAMA_FTYPE_MOSTLY_IQ1_M_R4 ||
++         params.ftype == LLAMA_FTYPE_MOSTLY_IQ1_M)) {
++        fprintf(stderr, "\n==========================================================================================================\n");
++        fprintf(stderr, "Please do not use IQ1_S, IQ1_M, IQ2_S, IQ2_XXS, IQ2_XS or Q2_K_S quantization without an importance matrix\n");
++        fprintf(stderr, "==========================================================================================================\n\n\n");
++        return 1;
++    }
++
++    print_build_info();
++
++    fprintf(stderr, "%s: quantizing '%s' to '%s' as %s", __func__, fname_inp.c_str(), fname_out.c_str(), ftype_str.c_str());
++    if (params.nthread > 0) {
++        fprintf(stderr, " using %d threads", params.nthread);
++    }
++    fprintf(stderr, "\n");
++
++    const int64_t t_main_start_us = llama_time_us();
++
++    int64_t t_quantize_us = 0;
++
++    // load the model
++    {
++        const int64_t t_start_us = llama_time_us();
++
++        if (llama_model_quantize(fname_inp.c_str(), fname_out.c_str(), &params)) {
++            fprintf(stderr, "%s: failed to quantize model from '%s'\n", __func__, fname_inp.c_str());
++            return 1;
++        }
++
++        t_quantize_us = llama_time_us() - t_start_us;
++    }
++
++    // report timing
++    {
++        const int64_t t_main_end_us = llama_time_us();
++
++        printf("\n");
++        printf("%s: quantize time = %8.2f ms\n", __func__, t_quantize_us/1000.0);
++        printf("%s:    total time = %8.2f ms\n", __func__, (t_main_end_us - t_main_start_us)/1000.0);
++    }
++
++    llama_backend_free();
++
++    return 0;
++}
+diff --git a/ggml/include/ggml.h b/ggml/include/ggml.h
+index a7c3d99a..db7519e4 100644
+--- a/ggml/include/ggml.h
++++ b/ggml/include/ggml.h
+@@ -384,6 +384,8 @@ extern "C" {
+     GGML_API void        ggml_fp32_to_bf16_row_ref(const float *, ggml_bf16_t *, int64_t);
+     GGML_API void        ggml_fp32_to_bf16_row(const float *, ggml_bf16_t *, int64_t);
+ 
++    typedef struct { uint8_t bits; } ggml_fp8_e4m3_t;
++
+     struct ggml_object;
+     struct ggml_context;
+ 
+@@ -427,6 +429,8 @@ extern "C" {
+         GGML_TYPE_MXFP4     = 39,  // so we are compatible with mainline
+         GGML_TYPE_Q1_0_G128 = 41,  // Bonsai 1-bit quants
+         GGML_TYPE_Q2_0      = 42,  // same type id as mainline GGML_TYPE_Q2_0
++        // OCP FP8 E4M3 (signed, 4 exp + 3 mantissa, E4M3)
++        GGML_TYPE_F8_E4M3   = 43,  // same ID as mainline
+         //
+         //
+         GGML_TYPE_Q8_0_X4 = 97,
+@@ -498,7 +502,7 @@ extern "C" {
+         GGML_TYPE_Q8_K_R16   = 397,
+         GGML_TYPE_Q8_KV_R8   = 398,
+         GGML_TYPE_Q8_K_R8    = 399,
+-        GGML_TYPE_COUNT,
++        GGML_TYPE_COUNT = 400,
+     };
+ 
+     // precision
+@@ -544,6 +548,7 @@ extern "C" {
+         GGML_FTYPE_MOSTLY_Q4_0_4_8 = 27, // except 1d tensors
+         GGML_FTYPE_MOSTLY_Q4_0_8_8 = 28, // except 1d tensors
+         GGML_FTYPE_MOSTLY_Q1_0_128 = 29, // except 1d tensors
++        GGML_FTYPE_MOSTLY_F8_E4M3  = 42, // except 1d tensors
+         //
+         GGML_FTYPE_MOSTLY_Q6_0    = 127, // except 1d tensors
+         GGML_FTYPE_MOSTLY_IQ1_BN  = 128, // except 1d tensors
+diff --git a/ggml/src/ggml-impl.h b/ggml/src/ggml-impl.h
+index 62f07e1e..5c0f1adf 100644
+--- a/ggml/src/ggml-impl.h
++++ b/ggml/src/ggml-impl.h
+@@ -95,6 +95,33 @@ static inline float ggml_compute_bf16_to_fp32(ggml_bf16_t h) {
+     return u.f;
+ }
+ 
++static inline float ggml_f8_e4m3_to_fp32(uint8_t x) {
++    const uint8_t ax = x & 0x7F;
++    if (ax == 0x7F) { return NAN; }
++    const int exp = (ax >> 3) & 0xF;
++    const int man = ax & 0x7;
++    const float value = exp == 0
++        ? ldexpf((float) man, -9)
++        : ldexpf(1.0f + (float) man / 8.0f, exp - 7);
++    return x & 0x80 ? -value : value;
++}
++
++static inline uint8_t ggml_fp32_to_f8_e4m3(float x) {
++    const uint8_t sign = signbit(x) ? 0x80 : 0;
++    x = fabsf(x);
++    if (isnan(x)) { return 0x7F; }
++    if (x == 0.0f) { return sign; }
++    if (isinf(x) || x >= 448.0f) { return sign | 0x7E; }
++    if (x < 0.015625f) { return sign | (uint8_t) (int)(x * 512.0f + 0.5f); }
++    int exp;
++    const float mantissa = frexpf(x, &exp) * 2.0f;
++    int encoded_exp = exp + 6;
++    int encoded_man = (int)((mantissa - 1.0f) * 8.0f + 0.5f);
++    if (encoded_man == 8) { encoded_man = 0; encoded_exp++; }
++    if (encoded_exp > 15 || (encoded_exp == 15 && encoded_man > 6)) { return sign | 0x7E; }
++    return sign | (uint8_t)(encoded_exp << 3) | (uint8_t)encoded_man;
++}
++
+ /**
+  * Converts float32 to brain16.
+  *
+diff --git a/ggml/src/ggml-quants.h b/ggml/src/ggml-quants.h
+index 1e266581..5bf16be3 100644
+--- a/ggml/src/ggml-quants.h
++++ b/ggml/src/ggml-quants.h
+@@ -73,6 +73,8 @@ void quantize_row_iq1_bn (const float * GGML_RESTRICT x, void * GGML_RESTRICT y,
+ void quantize_row_iq1_s  (const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
+ void quantize_row_iq1_m  (const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
+ 
++void quantize_row_f8_e4m3(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
++
+ // Dequantization
+ void dequantize_row_q2_0(const block_q2_0 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void dequantize_row_q4_0(const block_q4_0 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+@@ -101,6 +103,8 @@ void dequantize_row_iq4_xs (const block_iq4_xs  * GGML_RESTRICT x, float * GGML_
+ void dequantize_row_iq3_s  (const block_iq3_s   * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void dequantize_row_iq1_bn (const block_iq1_bn  * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ 
++void dequantize_row_f8_e4m3(const ggml_fp8_e4m3_t * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
++
+ // Dot product
+ void ggml_vec_dot_q2_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc);
+ void ggml_vec_dot_q4_0_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc);
+diff --git a/ggml/src/iqk/iqk_quantize.cpp b/ggml/src/iqk/iqk_quantize.cpp
+index ad2db007..c7857eef 100644
+--- a/ggml/src/iqk/iqk_quantize.cpp
++++ b/ggml/src/iqk/iqk_quantize.cpp
+@@ -4925,6 +4925,29 @@ size_t quantize_mxfp4_r8(const float * src, void * dst, int64_t nrows, int64_t n
+     return nrows * row_size;
+ }
+ 
++void quantize_row_f8_e4m3_ref(const float * GGML_RESTRICT x, ggml_fp8_e4m3_t * GGML_RESTRICT y, int64_t k) {
++    for (int64_t i = 0; i < k; ++i) {
++        y[i].bits = ggml_fp32_to_f8_e4m3(x[i]);
++    }
++}
++
++void quantize_row_f8_e4m3(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k) {
++    quantize_row_f8_e4m3_ref(x, (ggml_fp8_e4m3_t *)y, k);
++}
++
++size_t quantize_f8_e4m3(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrows, int64_t n_per_row, const float * imatrix, const struct quantize_user_data * use_data) {
++    GGML_UNUSED(imatrix);
++    GGML_UNUSED(use_data);
++    quantize_row_f8_e4m3_ref(src, (ggml_fp8_e4m3_t *)dst, nrows * n_per_row);
++    return nrows * n_per_row * sizeof(ggml_fp8_e4m3_t);
++}
++
++void dequantize_row_f8_e4m3(const ggml_fp8_e4m3_t * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
++    for (int64_t i = 0; i < k; ++i) {
++        y[i] = ggml_f8_e4m3_to_fp32(x[i].bits);
++    }
++}
++
+ void dequantize_row_mxfp4_r8(const block_mxfp4_r8 * x, float * y, int64_t k) {
+     constexpr int kBlockSize = QK_MXFP4;
+     int n_per_row = k/8;
+diff --git a/ggml/src/iqk/iqk_quantize.h b/ggml/src/iqk/iqk_quantize.h
+index 8cb83148..556367c1 100644
+--- a/ggml/src/iqk/iqk_quantize.h
++++ b/ggml/src/iqk/iqk_quantize.h
+@@ -81,6 +81,11 @@ size_t quantize_mxfp4(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst,
+ void   dequantize_row_mxfp4(const block_mxfp4 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void   vec_dot_mxfp4_q8_0_x4(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc);
+ 
++void   quantize_row_f8_e4m3_ref(const float * GGML_RESTRICT x, ggml_fp8_e4m3_t * GGML_RESTRICT y, int64_t k);
++void   quantize_row_f8_e4m3(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
++size_t quantize_f8_e4m3(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrows, int64_t n_per_row, const float * imatrix, const struct quantize_user_data * use_data);
++void   dequantize_row_f8_e4m3(const ggml_fp8_e4m3_t * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
++
+ void   quantize_row_iq2_ks_ref(const float * GGML_RESTRICT x, block_iq2_ks  * GGML_RESTRICT y, int64_t k);
+ void   quantize_row_iq2_ks(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
+ size_t quantize_iq2_ks(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrows, int64_t n_per_row, const float * imatrix, const struct quantize_user_data * use_data);
+diff --git a/include/llama.h b/include/llama.h
+index 928ae875..ddd45de8 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -193,6 +193,7 @@ extern "C" {
+         LLAMA_FTYPE_MOSTLY_Q4_0_8_8      = 35, // except 1d tensors
+         LLAMA_FTYPE_MOSTLY_MXFP4         = 38, // except 1d tensors, 38 to be compatible with mainline
+         LLAMA_FTYPE_MOSTLY_NVFP4         = 39,
++        LLAMA_FTYPE_MOSTLY_F8_E4M3       = 42, // except 1d tensors
+         LLAMA_FTYPE_MOSTLY_Q1_0_G128     = 41, // except 1d tensors, 38 to be compatible with mainline
+         //
+         LLAMA_FTYPE_MOSTLY_Q6_0          = 135, // except 1d tensors
+diff --git a/src/llama-model.cpp b/src/llama-model.cpp
+index c4f5504b..5d7104b4 100644
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -2675,6 +2675,7 @@ std::string llama_model_ftype_name(llama_ftype ftype) {
+         case LLAMA_FTYPE_MOSTLY_Q4_0_4_4: return "Q4_0_4_4";
+         case LLAMA_FTYPE_MOSTLY_Q4_0_4_8: return "Q4_0_4_8";
+         case LLAMA_FTYPE_MOSTLY_Q4_0_8_8: return "Q4_0_8_8";
++        case LLAMA_FTYPE_MOSTLY_F8_E4M3:  return "F8_E4M3 - 8.0 bpw";
+ 
+         default: return "unknown, may not work";
+     }
+diff --git a/src/llama-quantize.cpp b/src/llama-quantize.cpp
+index c28497cb..e304e79c 100644
+--- a/src/llama-quantize.cpp
++++ b/src/llama-quantize.cpp
+@@ -1358,6 +1358,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
+         case LLAMA_FTYPE_MOSTLY_Q4_0_4_4: default_type = GGML_TYPE_Q4_0_4_4; break;
+         case LLAMA_FTYPE_MOSTLY_Q4_0_4_8: default_type = GGML_TYPE_Q4_0_4_8; break;
+         case LLAMA_FTYPE_MOSTLY_Q4_0_8_8: default_type = GGML_TYPE_Q4_0_8_8; break;
++        case LLAMA_FTYPE_MOSTLY_F8_E4M3:  default_type = GGML_TYPE_F8_E4M3;  break;
+ 
+         default: throw std::runtime_error(format("invalid output file type %d\n", ftype));
+     }
