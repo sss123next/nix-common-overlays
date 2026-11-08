@@ -26,7 +26,8 @@ self: super: {
       nativeBuildInputs = [
         pkg-config
         python3
-        makeWrapper
+        autoPatchelfHook
+        patchelf
       ];
 
       buildInputs = [
@@ -53,12 +54,19 @@ self: super: {
 
       doCheck = false;
 
-      # xkbcommon-dl dlopen()s libxkbcommon-x11.so at runtime; autoPatchelfHook
-      # resolves DT_NEEDED only, not dlopen().  Same pattern as ferrite.nix:
-      # wrapProgram with LD_LIBRARY_PATH covering dlopen'd libs.
-      postFixup = ''
-        wrapProgram $out/bin/flectar-mail \
-          --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath dlopenLibs}"
+      # xkbcommon-dl dlopen()s libxkbcommon-x11.so at runtime. autoPatchelfHook
+      # resolves DT_NEEDED only.  We must add dlopen'd lib dirs to RPATH
+      # *after* autoPatchelfHook re-writes it.  Override fixupPhase to order
+      # correctly: run autoPatchelf first via old fixup, then our patchelf.
+      fixupPhase = ''
+        runHook preFixup
+        runHook fixupPhaseExtra  # let standard fixup (strip, autoPatchelf) run
+        runHook postFixup
+
+        # autoPatchelfHook may have re-set RPATH; add our dlopen dirs on top.
+        rpath="${lib.makeLibraryPath dlopenLibs}"
+        existing=$(${patchelf}/bin/patchelf --print-rpath "$out/bin/flectar-mail" 2>/dev/null || true)
+        ${patchelf}/bin/patchelf --set-rpath "''${rpath}:''${existing}" "$out/bin/flectar-mail"
       '';
 
       # xkbcommon-dl dlopen()s libxkbcommon-x11.so — tell fediverse about it.
