@@ -8,6 +8,9 @@ self: super: {
         ref = "staging";
         rev = "ad29cbda62e92f145e44d7a10398a38af22ca986";
       };
+
+      # MCP-плагины: пребилт-директория (собраны webpack'ом, сохранены в репо)
+      mcpplugins = builtins.path { path = ./sillytavern-mcp-plugins; name = "sillytavern-mcp-plugins"; };
     in
     buildNpmPackage (finalAttrs: {
       pname = "sillytavern";
@@ -15,11 +18,9 @@ self: super: {
 
       npmDepsHash = "sha256-wAVmQuchjDXh7sTj8Q7+bJJoYCi7JdvlEeC5G9VtjMU=";
 
-      dontNpmBuild = true;
+      nativeBuildInputs = [ makeBinaryWrapper ];
 
-      nativeBuildInputs = [
-        makeBinaryWrapper
-      ];
+      dontNpmBuild = true;
 
       patches = [
         ./patches/sillytavern-esc-to-ctrl-esc.patch
@@ -67,7 +68,6 @@ self: super: {
 
       # npmInstallHook запускает npm pack, который игнорирует dist/ (через .npmignore).
       # Копируем то, что не попало в pack, вручную.
-      # Используем preInstall (до npmInstallHook), т.к. после npm pack dist уже будет в $out
       preInstall = ''
         # Сохраняем webpack output и default/ до npm pack
         mkdir -p /build/_preserve
@@ -93,24 +93,37 @@ self: super: {
         if [ -d /build/_preserve/default ]; then
           cp -r /build/_preserve/default/* $out/lib/node_modules/sillytavern/data/
         fi
+
+        # Устанавливаем MCP-серверный плагин в plugins/
+        echo "Installing MCP Server plugin..."
+        mkdir -p $out/lib/node_modules/sillytavern/plugins/SillyTavern-MCP-Server
+        cp ${mcpplugins}/server/dist/index.js \
+           $out/lib/node_modules/sillytavern/plugins/SillyTavern-MCP-Server/
+        cp ${mcpplugins}/server/package.json \
+           $out/lib/node_modules/sillytavern/plugins/SillyTavern-MCP-Server/
+
+        # Устанавливаем MCP-клиентское расширение в public/scripts/extensions/third-party/
+        echo "Installing MCP Client extension..."
+        mkdir -p $out/lib/node_modules/sillytavern/public/scripts/extensions/third-party/SillyTavern-MCP-Client
+        cp -r ${mcpplugins}/client/dist \
+              ${mcpplugins}/client/images \
+              ${mcpplugins}/client/templates \
+              $out/lib/node_modules/sillytavern/public/scripts/extensions/third-party/SillyTavern-MCP-Client/
+        cp ${mcpplugins}/client/manifest.json \
+           ${mcpplugins}/client/readme.md \
+           $out/lib/node_modules/sillytavern/public/scripts/extensions/third-party/SillyTavern-MCP-Client/
       '';
 
       # Обёртка для --global mode (XDG-директории)
       postFixup = ''
         # Патчим constants.js: глобальные расширения (third-party) должны
-        # читаться из DATA_ROOT, а не из read-only store. DATA_ROOT
-        # устанавливается в server.js ДО импорта users.js (который использует
-        # эту константу), но после импорта constants.js (чистые константы).
-        # Поэтому используем getter, который резолвится при обращении.
+        # читаться из DATA_ROOT, а не из read-only store.
         substituteInPlace $out/lib/node_modules/sillytavern/src/constants.js \
           --replace-fail \
           "globalExtensions: 'public/scripts/extensions/third-party'" \
           "get globalExtensions() { const d = globalThis.DATA_ROOT; return d ? d + '/../_extensions' : 'public/scripts/extensions/third-party'; }"
 
         # Патчим webpack-serve.js — пропускаем компиляцию, если output уже есть.
-        # Собранный на этапе buildPhase lib.js уже скопирован в DATA_ROOT/_webpack.
-        # webpack-serve.js: runWebpackCompiler → всегда запускает webpack.
-        # Заменяем на проверку наличия output файла.
         substituteInPlace $out/lib/node_modules/sillytavern/src/middleware/webpack-serve.js \
           --replace-fail \
           "devMiddleware.runWebpackCompiler = ({ forceDist = false, pruneCache = false } = {}) => {" \
@@ -118,7 +131,7 @@ self: super: {
 
         rm -f $out/bin/sillytavern
 
-        # Shell-скрипт-обёртка для --global mode (symlink webpack dist).
+        # Shell-скрипт-обёртка для --global mode
         cat > $out/bin/sillytavern << WRAPPER
         #!${bash}/bin/bash -e
         export NODE_ENV=production
