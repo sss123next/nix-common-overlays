@@ -10,9 +10,13 @@ self: super: {
         wayland
       ];
     in
+    let
+      # Pin overlay content hash into derivation so any change here forces rebuild.
+      overlayHash = builtins.hashString "sha256" (builtins.readFile ./flectar-mail.nix);
+    in
     rustPlatform.buildRustPackage {
       pname = "flectar-mail";
-      version = "0.1.0-unstable-2026-11-08a";
+      version = "0.1.0-unstable-2026-11-08a-${builtins.substring 0 8 overlayHash}";
 
       src = fetchgit {
         url = "https://github.com/flectar/mail";
@@ -60,8 +64,6 @@ self: super: {
           --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath dlopenLibs}"
       '';
 
-      # xkbcommon-dl dlopen()s libxkbcommon-x11.so — tell fediverse about it.
-      # Force rebuild marker.
       meta = with lib; {
         description = "A native email client built with Rust, Slint, and Blitz";
         longDescription = ''
