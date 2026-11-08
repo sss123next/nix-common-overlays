@@ -3,20 +3,16 @@ self: super: {
   flectar-mail =
     with super;
     let
-      # Бросаем кость nix-демону: меняем при каждом коммите оверлея.
       dlopenLibs = [
         libxkbcommon
         libGL
         wayland
+        fontconfig
       ];
-    in
-    let
-      # Pin overlay content hash into derivation so any change here forces rebuild.
-      overlayHash = builtins.hashString "sha256" (builtins.readFile ./flectar-mail.nix);
     in
     rustPlatform.buildRustPackage {
       pname = "flectar-mail";
-      version = "0.1.0-unstable-2026-11-08a-${builtins.substring 0 8 overlayHash}";
+      version = "0.1.0-unstable-2026-11-09";
 
       src = fetchgit {
         url = "https://github.com/flectar/mail";
@@ -25,7 +21,7 @@ self: super: {
         fetchSubmodules = true;
       };
 
-      cargoHash = "sha256-ILFHYKm4+pQ7OfGw3NY0xXrZaU0+9oCbVqAqGcz0ixI=";
+      cargoHash = "sha256-6W2+rvCcY7GyCJa36Ld0mN3j/+dSS/SfaTwG0hxpdaw=";
 
       nativeBuildInputs = [
         pkg-config
