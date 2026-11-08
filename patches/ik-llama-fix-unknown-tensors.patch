@@ -1,0 +1,165 @@
+From: sss@dark-alexandr.net
+Date: Sun, 9 Nov 2026 00:00:00 +0300
+Subject: [PATCH] ik-llama-fix-unknown-tensors: gracefully handle missing engram.layer_ids and unknown tensors
+
+- deepseek41.engram.layer_ids made optional (ml.get_arr_n with false flag)
+- Added n_unknown counter to llama_model_loader
+- Strange-name tensors (per_layer_token_embd.weight, etc.) counted as unknown
+- Unknown tensors (engram_gate, engram_kv from mainline GGUF) counted as unknown
+- done_getting_tensors accepts n_unknown mismatches gracefully
+
+[1mdiff --git a/src/llama-hparams.cpp b/src/llama-hparams.cpp[m
+[1mindex 685355d9..054c3a22 100644[m
+[1m--- a/src/llama-hparams.cpp[m
+[1m+++ b/src/llama-hparams.cpp[m
+[36m@@ -2409,41 +2409,42 @@[m [mvoid llm_load_hparams([m
+                     ml.get_key(LLM_KV_HASH_LAYER_COUNT, hparams.dsv4_hash_layer_count, false);[m
+ [m
+                     if (model.arch == LLM_ARCH_DEEPSEEK41) {[m
+[31m-                        ml.get_arr_n(LLM_KV_ENGRAM_LAYER_IDS, hparams.engram_n_layer);[m
+[31m-                        if (hparams.engram_n_layer == 0 || hparams.engram_n_layer > LLAMA_MAX_LAYERS) {[m
+[31m-                            throw std::runtime_error(format("DeepSeek-V4.1 engram layer count %u is out of range", hparams.engram_n_layer));[m
+[31m-                        }[m
+[31m-                        {[m
+[31m-                            std::vector<uint32_t> ids;[m
+[31m-                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_LAYER_IDS), ids);[m
+[31m-                            std::copy_n(ids.begin(), std::min<size_t>(ids.size(), LLAMA_MAX_LAYERS), hparams.engram_layer_ids.begin());[m
+[31m-                        }[m
+[31m-                        ml.get_key(LLM_KV_ENGRAM_HEAD_COUNT,     hparams.engram_n_head);[m
+[31m-                        ml.get_key(LLM_KV_ENGRAM_KEY_LENGTH,     hparams.engram_key_length);[m
+[31m-                        ml.get_key(LLM_KV_ENGRAM_MAX_NGRAM_SIZE, hparams.engram_max_ngram_size);[m
+[31m-                        ml.get_key(LLM_KV_ENGRAM_PAD_ID,         model.engram_pad_id);[m
+[31m-                        if (hparams.engram_n_head == 0 || hparams.engram_max_ngram_size < 2) {[m
+[31m-                            throw std::runtime_error("DeepSeek-V4.1 engram needs at least one head and a 2-gram");[m
+[31m-                        }[m
+[31m-                        for (uint32_t e = 0; e < hparams.engram_n_layer; ++e) {[m
+[31m-                            if (hparams.engram_layer_ids[e] >= hparams.n_layer) {[m
+[31m-                                throw std::runtime_error(format("engram layer %u is out of range", hparams.engram_layer_ids[e]));[m
+[32m+[m[32m                        if (ml.get_arr_n(LLM_KV_ENGRAM_LAYER_IDS, hparams.engram_n_layer, false)) {[m
+[32m+[m[32m                            if (hparams.engram_n_layer == 0 || hparams.engram_n_layer > LLAMA_MAX_LAYERS) {[m
+[32m+[m[32m                                throw std::runtime_error(format("DeepSeek-V4.1 engram layer count %u is out of range", hparams.engram_n_layer));[m
+[32m+[m[32m                            }[m
+[32m+[m[32m                            {[m
+[32m+[m[32m                                std::vector<uint32_t> ids;[m
+[32m+[m[32m                                ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_LAYER_IDS), ids);[m
+[32m+[m[32m                                std::copy_n(ids.begin(), std::min<size_t>(ids.size(), LLAMA_MAX_LAYERS), hparams.engram_layer_ids.begin());[m
+[32m+[m[32m                            }[m
+[32m+[m[32m                            ml.get_key(LLM_KV_ENGRAM_HEAD_COUNT,     hparams.engram_n_head);[m
+[32m+[m[32m                            ml.get_key(LLM_KV_ENGRAM_KEY_LENGTH,     hparams.engram_key_length);[m
+[32m+[m[32m                            ml.get_key(LLM_KV_ENGRAM_MAX_NGRAM_SIZE, hparams.engram_max_ngram_size);[m
+[32m+[m[32m                            ml.get_key(LLM_KV_ENGRAM_PAD_ID,         model.engram_pad_id);[m
+[32m+[m[32m                            if (hparams.engram_n_head == 0 || hparams.engram_max_ngram_size < 2) {[m
+[32m+[m[32m                                throw std::runtime_error("DeepSeek-V4.1 engram needs at least one head and a 2-gram");[m
+[32m+[m[32m                            }[m
+[32m+[m[32m                            for (uint32_t e = 0; e < hparams.engram_n_layer; ++e) {[m
+[32m+[m[32m                                if (hparams.engram_layer_ids[e] >= hparams.n_layer) {[m
+[32m+[m[32m                                    throw std::runtime_error(format("engram layer %u is out of range", hparams.engram_layer_ids[e]));[m
+[32m+[m[32m                                }[m
+[32m+[m[32m                            }[m
+[32m+[m[32m                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_MULTIPLIERS), model.engram_multipliers);[m
+[32m+[m[32m                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_PRIMES),      model.engram_primes);[m
+[32m+[m[32m                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_OFFSETS),     model.engram_offsets);[m
+[32m+[m[32m                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_TOKEN_MAP),   model.engram_token_map);[m
+[32m+[m[32m                            const size_t n_bucket = (size_t) (hparams.engram_max_ngram_size - 1) * hparams.engram_n_head;[m
+[32m+[m[32m                            if (model.engram_multipliers.size() != (size_t) hparams.engram_n_layer * hparams.engram_max_ngram_size) {[m
+[32m+[m[32m                                throw std::runtime_error("engram multiplier count does not match layers * ngram size");[m
+[32m+[m[32m                            }[m
+[32m+[m[32m                            if (model.engram_primes.size() != (size_t) hparams.engram_n_layer * n_bucket ||[m
+[32m+[m[32m                                model.engram_offsets.size() != model.engram_primes.size()) {[m
+[32m+[m[32m                                throw std::runtime_error("engram prime or offset count does not match layers * buckets");[m
+[32m+[m[32m                            }[m
+[32m+[m[32m                            for (uint64_t p : model.engram_primes) {[m
+[32m+[m[32m                                if (p == 0) throw std::runtime_error("engram prime of zero would divide by zero in the hash");[m
+                             }[m
+[31m-                        }[m
+[31m-                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_MULTIPLIERS), model.engram_multipliers);[m
+[31m-                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_PRIMES),      model.engram_primes);[m
+[31m-                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_OFFSETS),     model.engram_offsets);[m
+[31m-                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_TOKEN_MAP),   model.engram_token_map);[m
+[31m-                        const size_t n_bucket = (size_t) (hparams.engram_max_ngram_size - 1) * hparams.engram_n_head;[m
+[31m-                        if (model.engram_multipliers.size() != (size_t) hparams.engram_n_layer * hparams.engram_max_ngram_size) {[m
+[31m-                            throw std::runtime_error("engram multiplier count does not match layers * ngram size");[m
+[31m-                        }[m
+[31m-                        if (model.engram_primes.size() != (size_t) hparams.engram_n_layer * n_bucket ||[m
+[31m-                            model.engram_offsets.size() != model.engram_primes.size()) {[m
+[31m-                            throw std::runtime_error("engram prime or offset count does not match layers * buckets");[m
+[31m-                        }[m
+[31m-                        for (uint64_t p : model.engram_primes) {[m
+[31m-                            if (p == 0) throw std::runtime_error("engram prime of zero would divide by zero in the hash");[m
+                         }[m
+                     }[m
+ [m
+[1mdiff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp[m
+[1mindex aba93035..040fca78 100644[m
+[1m--- a/src/llama-model-loader.cpp[m
+[1m+++ b/src/llama-model-loader.cpp[m
+[36m@@ -518,6 +518,7 @@[m [mllama_model_loader::llama_model_loader(const std::string & fname, int ncmoe, boo[m
+             case GGML_TYPE_Q6_0_R4: ftype = LLAMA_FTYPE_MOSTLY_Q6_0_R4; break;[m
+             case GGML_TYPE_Q8_0_R8: ftype = LLAMA_FTYPE_MOSTLY_Q8_0_R8; break;[m
+             case GGML_TYPE_MXFP4:   ftype = LLAMA_FTYPE_MOSTLY_MXFP4;   break;[m
+[32m+[m[32m            case GGML_TYPE_F8_E4M3: ftype = LLAMA_FTYPE_MOSTLY_F8_E4M3; break;[m
+             case GGML_TYPE_IQ4_XS:  ftype = LLAMA_FTYPE_MOSTLY_IQ4_XS;  break;[m
+             case GGML_TYPE_IQ4_KS:  ftype = LLAMA_FTYPE_MOSTLY_IQ4_KS;  break;[m
+             case GGML_TYPE_IQ4_KS_R4:ftype = LLAMA_FTYPE_MOSTLY_IQ4_KS_R4;  break;[m
+[36m@@ -1111,8 +1112,12 @@[m [mvoid llama_model_loader::done_getting_tensors() const {[m
+         LLAMA_LOG_WARN("%s: skipped %d unused tensors (%.1f MiB) -- e.g. a NextN/MTP head when MTP is not requested; per-tensor detail at debug log level\n",[m
+                 __func__, n_skipped, size_skipped / 1024.0 / 1024.0);[m
+     }[m
+[31m-    if (n_created != n_tensors) {[m
+[31m-        throw std::runtime_error(format("%s: wrong number of tensors; expected %d, got %d", __func__, n_tensors, n_created));[m
+[32m+[m[32m    if (n_unknown > 0) {[m
+[32m+[m[32m        LLAMA_LOG_WARN("%s: ignored %d unknown tensors (extra tensors not expected by this architecture)\n",[m
+[32m+[m[32m                __func__, n_unknown);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    if (n_created + n_unknown != n_tensors) {[m
+[32m+[m[32m        throw std::runtime_error(format("%s: wrong number of tensors; expected %d, got %d (unknown %d)", __func__, n_tensors, n_created, n_unknown));[m
+     }[m
+ }[m
+ [m
+[1mdiff --git a/src/llama-model-loader.h b/src/llama-model-loader.h[m
+[1mindex 5633cc6c..e898cd4b 100644[m
+[1m--- a/src/llama-model-loader.h[m
+[1m+++ b/src/llama-model-loader.h[m
+[36m@@ -39,6 +39,7 @@[m [mstruct llama_model_loader {[m
+     int n_tensors = 0;[m
+     int n_created = 0;[m
+     int n_skipped = 0;[m
+[32m+[m[32m    mutable int n_unknown = 0;[m
+     size_t size_skipped = 0;[m
+ [m
+     int64_t n_elements = 0;[m
+[1mdiff --git a/src/llama.cpp b/src/llama.cpp[m
+[1mindex 7bca8152..d705073d 100644[m
+[1m--- a/src/llama.cpp[m
+[1m+++ b/src/llama.cpp[m
+[36m@@ -4427,12 +4427,14 @@[m [mstatic std::pair<std::vector<double>, double> get_layer_sizes(const llama_model_[m
+         auto pos = name.find("blk.");[m
+         if (pos != 0) {[m
+             LLAMA_LOG_WARN("Oops: tensor with strange name %s\n", name.c_str());[m
+[32m+[m[32m            ml.n_unknown++;[m
+             continue;[m
+         }[m
+         pos += 4;[m
+         auto pos1 = name.find('.', pos);[m
+         if (pos1 == std::string::npos) {[m
+             LLAMA_LOG_WARN("Oops: tensor with strange name %s\n", name.c_str());[m
+[32m+[m[32m            ml.n_unknown++;[m
+             continue;[m
+         }[m
+         auto layer_string = name.substr(pos, pos1-pos);[m
+[36m@@ -4443,6 +4445,7 @@[m [mstatic std::pair<std::vector<double>, double> get_layer_sizes(const llama_model_[m
+         }[m
+         if (il < 0 || il >= model.hparams.n_layer) {[m
+             LLAMA_LOG_WARN("Oops: strange layer index %d for tensor %s\n", il, name.c_str());[m
+[32m+[m[32m            ml.n_unknown++;[m
+             continue;[m
+         }[m
+         if (!model.mtp && model.hparams.nextn_predict_layers > 0 && il >= n_layer - model.hparams.nextn_predict_layers) {[m
+[36m@@ -4476,6 +4479,7 @@[m [mstatic std::pair<std::vector<double>, double> get_layer_sizes(const llama_model_[m
+             auto ttype = llm_tensor_type(model.arch, name, il);[m
+             if (ttype == LLM_TENSOR_UNKNOWN) {[m
+                 LLAMA_LOG_WARN("Oops: got unknown for tensor %s\n", name.c_str());[m
+[32m+[m[32m                ml.n_unknown++;[m
+                 continue;[m
+             }[m
+             if (ttype == LLM_TENSOR_FFN_GATE_UP_EXPS || ttype == LLM_TENSOR_FFN_GATE_EXPS || ttype == LLM_TENSOR_FFN_UP_EXPS || ttype == LLM_TENSOR_FFN_DOWN_EXPS) {[m

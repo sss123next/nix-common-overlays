@@ -35,6 +35,8 @@ self: super: {
           ./patches/ik-llama-stats-interval.patch
           ./patches/ik-llama-fix-vk-host-buffer.patch
           ./patches/ik-llama-json-schema-pattern.patch
+          ./patches/ik-llama-f8-e4m3.patch
+          ./patches/ik-llama-fix-unknown-tensors.patch
         ];
 
         # Базовый уровень инструкций — AVX2. -march=native не использовать:
