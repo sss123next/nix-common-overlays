@@ -44,6 +44,12 @@ self: super: {
 
     doCheck = false;
 
+    # xkbcommon-dl dlopen()s libxkbcommon-x11.so at runtime — autoPatchelfHook
+    # won't see it via normal ELF DT_NEEDED.  Add it to RPATH explicitly.
+    postFixup = ''
+      patchelf --add-rpath ${super.lib.getLib super.libxkbcommon}/lib $out/bin/flectar-mail
+    '';
+
     meta = with super.lib; {
       description = "A native email client built with Rust, Slint, and Blitz";
       longDescription = ''
