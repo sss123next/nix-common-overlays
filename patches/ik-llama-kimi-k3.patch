@@ -1,21 +1,14 @@
 From: sss@dark-alexandr.net
-Date: Mon, 9 Nov 2026 01:00:00 +0300
+Date: Mon, 9 Nov 2026 02:00:00 +0300
 Subject: [PATCH] ik-llama-kimi-k3: add Kimi K3 architecture support
 
 Port of Kimi K3 (LLM_ARCH_KIMI_K3) from mainline llama.cpp (commit
-ad1de39e) to ik_llama.cpp. New hybrid architecture with KDA (linear)
-and MLA (full) attention layers, latent MoE, cross-layer residual
-attention, and situ activation.
+ad1de39e) to ik_llama.cpp. Hybrid architecture with KDA (linear) and
+MLA (full) attention layers, latent MoE, cross-layer residual scores,
+and situ activation.
 
-Changes:
-- llama-arch.h: new enum LLM_ARCH_KIMI_K3, KV keys, tensor enums
-- llama-arch.cpp: arch/kv/tensor name mappings
-- llama-hparams.h/cpp: new fields + GGUF loading
-- llama-model.h/cpp: tensor map, model type 2.8T.A50B
-- llama-load-tensors.cpp: create_kimi_k3_tensors()
-- llama-build-context.h/cpp: build_kimi_k3() dispatch
-- graphs/build_kimi_k3.cpp: full inference graph (KDA + MLA + MoE)
-- CMakeLists.txt: add build_kimi_k3.cpp
+12 files changed, 516 insertions(+), 1 deletion(-)
+create mode 100644 src/graphs/build_kimi_k3.cpp
 
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
 index cbed99f0..5e911723 100644
@@ -31,12 +24,13 @@ index cbed99f0..5e911723 100644
              graphs/build_minimaxm3.cpp
 diff --git a/src/graphs/build_kimi_k3.cpp b/src/graphs/build_kimi_k3.cpp
 new file mode 100644
-index 00000000..045b6fc9
+index 00000000..0045ecec
 --- /dev/null
 +++ b/src/graphs/build_kimi_k3.cpp
-@@ -0,0 +1,293 @@
+@@ -0,0 +1,241 @@
 +#include "../llama-build-context.h"
 +#include "../llama-model.h"
++#include "../llama-context.h"
 +#include "../llama-delta-net.h"
 +
 +#include <cmath>
@@ -57,58 +51,30 @@ index 00000000..045b6fc9
 +        ggml_tensor * up,
 +        float situ_beta,
 +        float situ_linear_beta) {
-+    // situ(x) = beta * tanh(gate / beta) * sigmoid(gate) * linear_beta * tanh(up / linear_beta)
++    // situ_simple(gate, up) = tanh(gate/beta) * sigmoid(gate) * up
++    // situ_linear: multiply by tanh(up/linear_beta) when linear_beta > 0
 +    auto g = ggml_mul(ctx0,
 +            ggml_mul(ctx0,
 +                ggml_tanh(ctx0, ggml_scale(ctx0, gate, 1.0f / situ_beta)),
 +                ggml_sigmoid(ctx0, gate)),
 +            up);
-+    if (situ_linear_beta != 0.0f) {
++    if (situ_linear_beta > 0.0f) {
 +        g = ggml_mul(ctx0, g, ggml_tanh(ctx0, ggml_scale(ctx0, up, 1.0f / situ_linear_beta)));
 +    }
 +    return g;
 +}
 +
-+static ggml_tensor * kimi_k3_conv1d(
-+        ggml_context * ctx0,
-+        ggml_cgraph * gf,
-+        ggml_tensor * cur,
-+        ggml_tensor * conv1d_w,
-+        ggml_tensor * state_storage,
-+        int64_t ssm_d_conv, int64_t d_inner,
-+        int64_t n_tokens, int il, const llm_build_cb & cb) {
-+    // causal conv1d: cur @ conv1d_w, then SiLU activation on the state branch
-+    auto cur_conv = ggml_conv_1d(ctx0, conv1d_w, cur, 1, 0, 1);
-+    // state: convolve with state from previous step
-+    auto prev = ggml_view_2d(ctx0, state_storage, d_inner, 1,
-+            state_storage->nb[1], 0);
-+    auto state_conv = ggml_mul_mat(ctx0, conv1d_w, prev);
-+    auto state_act = ggml_silu(ctx0, ggml_add(ctx0, state_conv, cur_conv));
-+    cb(state_act, "conv1d_act", il);
-+    return state_act;
-+}
-+
-+static ggml_tensor * res_push(
-+        std::vector<ggml_tensor *> & bank,
-+        ggml_tensor * x,
-+        int64_t block_size) {
-+    if (block_size == 0) return nullptr;
-+    bank.push_back(x);
-+    if ((int64_t) bank.size() > block_size) {
-+        bank.erase(bank.begin());
-+    }
-+    return nullptr;
-+}
-+
-+static ggml_tensor * res_mix(
++static ggml_tensor * kimi_k3_res_mix(
 +        ggml_context * ctx0,
 +        ggml_tensor * cur,
 +        ggml_tensor * score,
-+        int64_t n_tokens,
++        const llm_build_cb & cb,
 +        int il) {
 +    if (!score) return cur;
-+    // score is [n_embd, n_embd]; apply as a linear projection on the residual dimension
-+    auto s = ggml_mul_mat(ctx0, score, cur);
++    // Element-wise gate: cur += score * cur
++    // In mainline this is a full cross-layer softmax over a checkpoint bank;
++    // simplified here since ik_llama lacks the per-token state machinery.
++    auto s = ggml_mul(ctx0, score, cur);
 +    cb(s, "res_mix", il);
 +    return ggml_add(ctx0, cur, s);
 +}
@@ -116,23 +82,14 @@ index 00000000..045b6fc9
 +ggml_cgraph * llm_build_context::build_kimi_k3() {
 +    ggml_cgraph * gf = new_graph_custom();
 +
-+    const int64_t n_embd              = hparams.n_embd;
 +    const int64_t n_tokens            = this->n_tokens;
 +    const int64_t n_outputs           = this->n_outputs;
 +    const int64_t n_head              = hparams.n_head();
-+    const int64_t n_head_kda          = hparams.ssm_dt_rank;
-+    const int64_t ssm_d_state         = hparams.ssm_d_state;
-+    const int64_t ssm_d_inner         = hparams.ssm_d_inner;
-+    const int64_t ssm_d_conv          = hparams.ssm_d_conv;
 +    const int64_t attn_res_block_size = hparams.attn_res_block_size;
 +    const int64_t n_expert_latent     = hparams.n_expert_latent;
 +    const int64_t n_embd_head_v_mla   = hparams.n_embd_head_v_mla();
 +    const int64_t n_embd_head_k_mla   = hparams.n_embd_head_k_mla();
 +    const int64_t n_embd_head_qk_nope = n_embd_head_k_mla - hparams.n_rot;
-+    const int64_t q_lora_rank         = hparams.n_lora_q;
-+    const int64_t kv_lora_rank        = hparams.n_lora_kv;
-+    const int64_t n_ff                = hparams.n_ff;
-+    const int64_t n_ff_exp            = hparams.n_ff_exp;
 +    const float   situ_beta           = hparams.situ_beta;
 +    const float   situ_linear_beta    = hparams.situ_linear_beta;
 +    const bool    use_attn_res        = attn_res_block_size > 0;
@@ -147,19 +104,12 @@ index 00000000..045b6fc9
 +    cb(lctx.inp_s_seq_qnext, "inp_s_seq_qnext", -1);
 +    ggml_set_input(lctx.inp_s_seq_qnext);
 +
-+    // cross-layer attention residual bank
-+    std::vector<ggml_tensor *> attn_res_bank;
-+    attn_res_bank.reserve(attn_res_block_size > 0 ? (size_t) attn_res_block_size : 0);
-+
 +    ggml_tensor * inp = llm_build_inp_embd(ctx0, lctx, hparams, batch, model.tok_embd, cb);
 +    ggml_tensor * inpL = inp;
 +    ggml_tensor * prefix_sum = inpL;
 +
 +    for (int il = 0; il < (int) hparams.n_layer; ++il) {
 +        const auto & layer = model.layers[il];
-+
-+        // sub-token position indices for conv1d state addressing
-+        auto * inp_s_seq_qnext = lctx.inp_s_seq_qnext;
 +
 +        // ---- attention block ----
 +        // build_layer_attn_kda handles its own norm internally;
@@ -172,19 +122,21 @@ index 00000000..045b6fc9
 +            cb(cur, "kda_out", il);
 +        } else {
 +            // MLA layer (nope-only, no RoPE)
++            // Need to norm before attention (KDA does its own, MLA does not)
++            cur = llm_build_norm(ctx0, prefix_sum, hparams, layer.attn_norm, nullptr, LLM_NORM_RMS, cb, il);
++            cb(cur, "attn_norm", il);
++
 +            // Q down-projection
 +            auto q_a = ggml_mul_mat(ctx0, layer.wq_a, cur);
 +            auto q_a_norm = llm_build_norm(ctx0, q_a, hparams, layer.attn_q_a_norm, nullptr, LLM_NORM_RMS, cb, il);
 +            auto q_b = ggml_mul_mat(ctx0, layer.wq_b, q_a_norm);
 +            cb(q_b, "q", il);
 +
-+            // KV down-projection (no RoPE split since nope-only)
++            // KV down-projection (nope-only: all kv_lora_rank used as key)
 +            auto kv_a = ggml_mul_mat(ctx0, layer.wkv_a_mqa, cur);
 +            auto kv_a_norm = llm_build_norm(ctx0, kv_a, hparams, layer.attn_kv_a_norm, nullptr, LLM_NORM_RMS, cb, il);
-+            // KV_a is [kv_lora_rank, n_tokens]; split into k (first kv_lora_rank) and no RoPE portion
-+            auto k = kv_a_norm; // nope-only: all kv_lora_rank
 +            // K_B: [n_embd_head_qk_nope, kv_lora_rank, n_head]
-+            auto k_b = ggml_mul_mat(ctx0, layer.wk_b, ggml_cont(ctx0, ggml_transpose(ctx0, k)));
++            auto k_b = ggml_mul_mat(ctx0, layer.wk_b, ggml_cont(ctx0, ggml_transpose(ctx0, kv_a_norm)));
 +            k_b = ggml_cont(ctx0, ggml_transpose(ctx0, k_b));
 +            // V_B: [kv_lora_rank, n_embd_head_v_mla, n_head]
 +            auto v = ggml_mul_mat(ctx0, layer.wv_b, ggml_cont(ctx0, ggml_transpose(ctx0, kv_a_norm)));
@@ -194,21 +146,23 @@ index 00000000..045b6fc9
 +            auto Kcur = ggml_reshape_4d(ctx0, k_b, n_embd_head_qk_nope, 1, n_head, n_tokens);
 +            auto Vcur = ggml_reshape_4d(ctx0, v, n_embd_head_v_mla, 1, n_head, n_tokens);
 +
-+            // KQ scores (no RoPE correction)
++            // Transpose Q to [n_embd_head_k_mla, n_head, n_tokens] for score computation
 +            ggml_tensor * q = ggml_reshape_4d(ctx0, q_b, n_embd_head_k_mla, 1, n_head, n_tokens);
-+            auto KQ = ggml_mul_mat(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, Kcur, n_embd_head_qk_nope, n_head * n_tokens))),
-+                                      ggml_reshape_2d(ctx0, q, n_embd_head_k_mla, n_head * n_tokens));
++            auto KQ = ggml_mul_mat(ctx0,
++                    ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, Kcur, n_embd_head_qk_nope, n_head * n_tokens))),
++                    ggml_reshape_2d(ctx0, q, n_embd_head_k_mla, n_head * n_tokens));
 +            KQ = ggml_reshape_4d(ctx0, KQ, 1, n_tokens, n_head, n_tokens);
 +
 +            // Attention softmax
 +            auto KQ_scaled = ggml_scale(ctx0, KQ, 1.0f / sqrtf((float) n_embd_head_k_mla));
 +            auto KQ_masked = ggml_diag_mask_inf(ctx0, KQ_scaled, 0);
-+            auto KQ_soft = ggml_soft_max_ext(ctx0, KQ_masked, KQ_mask);
++            auto KQ_soft = ggml_soft_max_ext(ctx0, KQ_masked, KQ_mask, 1.0f, 1.0f);
 +            cb(KQ_soft, "attn_soft", il);
 +
 +            // V attention
-+            auto V_attn = ggml_mul_mat(ctx0, ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, Vcur, n_embd_head_v_mla, n_head * n_tokens))),
-+                                          ggml_reshape_2d(ctx0, KQ_soft, 1 * n_tokens, n_head * n_tokens));
++            auto V_attn = ggml_mul_mat(ctx0,
++                    ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, Vcur, n_embd_head_v_mla, n_head * n_tokens))),
++                    ggml_reshape_2d(ctx0, KQ_soft, n_tokens, n_head * n_tokens));
 +            auto o = ggml_reshape_4d(ctx0, V_attn, n_embd_head_v_mla, 1, n_head, n_tokens);
 +
 +            // Output projection
@@ -222,14 +176,12 @@ index 00000000..045b6fc9
 +
 +        // Cross-layer attention residual
 +        if (use_attn_res) {
-+            cur = res_mix(ctx0, cur, layer.attn_res_score, n_tokens, il);
++            cur = kimi_k3_res_mix(ctx0, cur, layer.attn_res_score, cb, il);
 +        }
++
 +        prefix_sum = ggml_add(ctx0, prefix_sum, cur);
 +        prefix_sum = lctx.cvec.apply_to(ctx0, prefix_sum, il);
-+        cb(prefix_sum, "attn_residual", il);
-+
-+        // Cross-layer residual: push attention output to bank
-+        res_push(attn_res_bank, cur, attn_res_block_size);
++        cb(prefix_sum, "prefix_sum_attn", il);
 +
 +        // ---- FFN block ----
 +        cur = llm_build_norm(ctx0, prefix_sum, hparams, layer.ffn_norm, nullptr, LLM_NORM_RMS, cb, il);
@@ -242,32 +194,22 @@ index 00000000..045b6fc9
 +            cur = ggml_mul_mat(ctx0, layer.ffn_down, kimi_k3_situ(ctx0, g, u, situ_beta, situ_linear_beta));
 +            cb(cur, "ffn_out", il);
 +        } else {
-+            // MoE: gating + routed experts (latent) + shared expert (full-dim)
-+            auto gate_inp = ggml_mul_mat(ctx0, layer.ffn_gate_inp, cur);
-+            auto probs = ggml_soft_max_ext(ctx0, gate_inp, nullptr);
-+
-+            // Standard routed experts
-+            ggml_tensor * moe_out = nullptr;
-+            {
-+                auto * up_exps   = layer.ffn_up_exps;
-+                auto * gate_exps = layer.ffn_gate_exps;
-+                auto * down_exps = layer.ffn_down_exps;
-+                auto * exp_probs_b = layer.ffn_exp_probs_b;
-+
-+                moe_out = llm_build_moe_ffn(ctx0, lctx, cur,
-+                        layer.ffn_gate_inp, nullptr,
-+                        up_exps, nullptr,
-+                        gate_exps, nullptr,
-+                        down_exps, nullptr,
-+                        exp_probs_b,
-+                        hparams.n_expert, hparams.n_expert_used,
-+                        LLM_FFN_SITU, hparams.expert_weights_norm,
-+                        true, hparams.expert_weights_scale,
-+                        (llm_expert_gating_func_type) hparams.expert_gating_func,
-+                        cb, il, gf, false,
-+                        nullptr, nullptr, nullptr, nullptr, nullptr);
-+                cb(moe_out, "moe_out", il);
-+            }
++            // MoE: gating + routed experts + shared expert
++            // Use ff_n as intermediate size for the dense-lead case too,
++            // but for MoE we use n_ff_exp as per-layer expert width.
++            auto moe_out = llm_build_moe_ffn(ctx0, lctx, cur,
++                    layer.ffn_gate_inp, nullptr,
++                    layer.ffn_up_exps, nullptr,
++                    layer.ffn_gate_exps, nullptr,
++                    layer.ffn_down_exps, nullptr,
++                    layer.ffn_exp_probs_b,
++                    hparams.n_expert, hparams.n_expert_used,
++                    LLM_FFN_SITU, hparams.expert_weights_norm,
++                    true, hparams.expert_weights_scale,
++                    (llm_expert_gating_func_type) hparams.expert_gating_func,
++                    cb, il, gf, false,
++                    nullptr, nullptr, nullptr, nullptr, nullptr);
++            cb(moe_out, "moe_out", il);
 +
 +            // Shared expert (full-dim, situ activation)
 +            auto ffn_shexp = llm_build_ffn(ctx0, lctx, nullptr, cur,
@@ -280,7 +222,6 @@ index 00000000..045b6fc9
 +
 +            // Latent MoE routed (if present)
 +            if (use_latent_moe && layer.ffn_routed_down) {
-+                // Down-project to latent space, route, up-project back
 +                auto routed = ggml_mul_mat(ctx0, layer.ffn_routed_down, cur);
 +                routed = llm_build_norm(ctx0, routed, hparams, layer.ffn_routed_norm, nullptr, LLM_NORM_RMS, cb, il);
 +                auto g_routed = ggml_mul_mat(ctx0, layer.ffn_gate, routed);
@@ -297,7 +238,7 @@ index 00000000..045b6fc9
 +
 +        // Cross-layer FFN residual
 +        if (use_attn_res) {
-+            cur = res_mix(ctx0, cur, layer.ffn_res_score, n_tokens, il);
++            cur = kimi_k3_res_mix(ctx0, cur, layer.ffn_res_score, cb, il);
 +        }
 +
 +        prefix_sum = ggml_add(ctx0, prefix_sum, cur);
@@ -312,7 +253,7 @@ index 00000000..045b6fc9
 +
 +    // Output cross-layer residual mix
 +    if (use_attn_res) {
-+        cur = res_mix(ctx0, cur, model.output_res_score, n_tokens, -1);
++        cur = kimi_k3_res_mix(ctx0, cur, model.output_res_score, cb, -1);
 +    }
 +
 +    if (inp_out_ids) {
@@ -329,7 +270,7 @@ index 00000000..045b6fc9
 +    return gf;
 +}
 diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
-index 1f976426..715871e7 100644
+index 1f976426..ccbbae00 100644
 --- a/src/llama-arch.cpp
 +++ b/src/llama-arch.cpp
 @@ -107,6 +107,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
@@ -340,6 +281,14 @@ index 1f976426..715871e7 100644
      { LLM_ARCH_UNKNOWN,         "(unknown)"    },
  };
  
+@@ -397,6 +398,7 @@ bool llm_arch_is_hybrid(const llm_arch & arch) {
+     case LLM_ARCH_LFM2MOE:
+     case LLM_ARCH_LFM3:
+     case LLM_ARCH_RAON1:
++    case LLM_ARCH_KIMI_K3:
+         return true;
+     default:
+         return false;
 diff --git a/src/llama-arch.h b/src/llama-arch.h
 index 2e1abcd1..0804a5c0 100644
 --- a/src/llama-arch.h
@@ -411,10 +360,10 @@ index fd1e4c9f..65a0200e 100644
  
      ggml_cgraph * build_glm5next_mtp();
 diff --git a/src/llama-hparams.cpp b/src/llama-hparams.cpp
-index 8f17274f..3a855db8 100644
+index 8f17274f..27a47594 100644
 --- a/src/llama-hparams.cpp
 +++ b/src/llama-hparams.cpp
-@@ -1066,6 +1066,71 @@ void llm_load_hparams(
+@@ -1066,6 +1066,69 @@ void llm_load_hparams(
  
                  model.type = e_model::MODEL_UNKNOWN;
              } break;
@@ -475,9 +424,7 @@ index 8f17274f..3a855db8 100644
 +                }
 +
 +                {
-+                    const uint32_t n_embd = hparams.n_embd;
-+                    LLM_KV k = LLM_KV(LLM_KV_HYPER_CONNECTION_COUNT);
-+                    switch (n_embd) {
++                    switch (hparams.n_embd) {
 +                        case 3200: model.type = e_model::MODEL_2_8T_A50B; break;
 +                        default:   model.type = e_model::MODEL_UNKNOWN;
 +                    }
@@ -487,24 +434,22 @@ index 8f17274f..3a855db8 100644
              {
                  ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,        hparams.n_ff_exp, false);
 diff --git a/src/llama-hparams.h b/src/llama-hparams.h
-index 085c6ff3..952d58ad 100644
+index 085c6ff3..8c4bacfa 100644
 --- a/src/llama-hparams.h
 +++ b/src/llama-hparams.h
-@@ -116,6 +116,12 @@ struct llama_hparams {
+@@ -116,6 +116,10 @@ struct llama_hparams {
      bool     kda_safe_gate = false;
      float    kda_gate_lower_bound = 0.0f;
  
 +    // kimi-k3
 +    uint32_t n_expert_latent     = 0;
 +    uint32_t attn_res_block_size = 0;
-+    float    situ_beta           = 0.0f;
-+    float    situ_linear_beta    = 0.0f;
 +
      // for hybrid state-space models (e.g. qwen3next)
      std::array<bool, LLAMA_MAX_LAYERS> recurrent_layer_arr;
  
 diff --git a/src/llama-load-tensors.cpp b/src/llama-load-tensors.cpp
-index 51f91309..e1dc24e9 100644
+index 51f91309..fbbeca18 100644
 --- a/src/llama-load-tensors.cpp
 +++ b/src/llama-load-tensors.cpp
 @@ -178,6 +178,7 @@ struct create_tensors_helper : public create_tensors_helper_interface {
@@ -544,7 +489,7 @@ index 51f91309..e1dc24e9 100644
 +                llama_model_loader::TENSOR_DUPLICATED);
 +    }
 +    // cross-layer residual: output residual score (model-level)
-+    model.output_res_score = create_tensor(ctx_output, tn(LLM_TENSOR_OUTPUT_RES_SCORE, "weight"), {n_embd, n_embd},
++    model.output_res_score = create_tensor(ctx_output, tn(LLM_TENSOR_OUTPUT_RES_SCORE, "weight"), {n_embd},
 +            llama_model_loader::TENSOR_NOT_REQUIRED);
 +
 +    for (uint32_t il = 0; il < hparams.n_layer; ++il) {
@@ -561,9 +506,9 @@ index 51f91309..e1dc24e9 100644
 +        layer.ffn_norm  = create_tensor(norm_ctx, tn(LLM_TENSOR_FFN_NORM,  "weight", il), {n_embd}, 0);
 +
 +        // cross-layer residual scores (per-layer)
-+        layer.attn_res_score = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_RES_SCORE, "weight", il), {n_embd, n_embd},
++        layer.attn_res_score = create_tensor(ctx_split, tn(LLM_TENSOR_ATTN_RES_SCORE, "weight", il), {n_embd},
 +                llama_model_loader::TENSOR_NOT_REQUIRED);
-+        layer.ffn_res_score  = create_tensor(ctx_split, tn(LLM_TENSOR_FFN_RES_SCORE,  "weight", il), {n_embd, n_embd},
++        layer.ffn_res_score  = create_tensor(ctx_split, tn(LLM_TENSOR_FFN_RES_SCORE,  "weight", il), {n_embd},
 +                llama_model_loader::TENSOR_NOT_REQUIRED);
 +
 +        if (is_rda) {
@@ -767,3 +712,15 @@ index df8a706d..e3fd1a4a 100644
      }
  
      float swiglu_limit(uint32_t il, bool shared) const {
+diff --git a/src/llama.cpp b/src/llama.cpp
+index 71f65321..b177bbdc 100644
+--- a/src/llama.cpp
++++ b/src/llama.cpp
+@@ -10537,6 +10537,7 @@ enum llama_rope_type llama_rope_type(const struct llama_model * model) {
+         case LLM_ARCH_JAIS:
+         case LLM_ARCH_GLM5NEXT:
+         case LLM_ARCH_GLM5NEXT_DASHED:
++        case LLM_ARCH_KIMI_K3:
+             return LLAMA_ROPE_TYPE_NONE;
+ 
+         // use what we call a normal RoPE, operating on pairs of consecutive head values
