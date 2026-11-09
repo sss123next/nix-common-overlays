@@ -73,13 +73,7 @@ self: super: {
           # upstream. x86_64-linux re-pinned for the production branch dep delta; other systems stay
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
-          outputHash = {
-            # Calibrated from remote-builder build — x86_64-linux
-            "x86_64-linux"   = "sha256-2lZC+v/j78ArDVqtYiJVrYErGTwqQqFz2sPFv7vPCNc=";
-            "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
-            "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
-            "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
-          }.${stdenv.hostPlatform.system};
+          outputHash = lib.fakeHash;
         };
 
       # schema.ts in v2 writes a single file per invocation (argv[2] only), so the
@@ -101,9 +95,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "84ea1bd71fb82ed594af217d8362339288276870";
+        rev = "7524e5f4955267efa9882e2dd0f485c363ae49e4";
 #        ref = "production";
-        hash = "sha256-kwxtRf1rndU9htZcoPdEvbOSn8YPRgkLrYVmuicnngQ=";
+        hash = lib.fakeHash;
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
