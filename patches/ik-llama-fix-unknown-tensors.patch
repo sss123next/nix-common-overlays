@@ -1,18 +1,41 @@
-From: sss@dark-alexandr.net
-Date: Sun, 9 Nov 2026 00:00:00 +0300
-Subject: [PATCH] ik-llama-fix-unknown-tensors: gracefully handle missing engram.layer_ids and unknown tensors
-
-- deepseek41.engram.layer_ids made optional (ml.get_arr_n with false flag)
-- Added n_unknown counter to llama_model_loader
-- Strange-name tensors (per_layer_token_embd.weight, etc.) counted as unknown
-- Unknown tensors (engram_gate, engram_kv from mainline GGUF) counted as unknown
-- done_getting_tensors accepts n_unknown mismatches gracefully
-
-diff --git a/src/llama-hparams.cpp b/src/llama-hparams.cpp
-index 685355d9..054c3a22 100644
---- a/src/llama-hparams.cpp
-+++ b/src/llama-hparams.cpp
-@@ -2409,41 +2409,42 @@ void llm_load_hparams(
+diff --git a/src/llama.cpp src/llama.cpp
+--- a/src/llama.cpp	2026-11-09 06:40:56.664384971 +0300
++++ b/src/llama.cpp	2026-11-09 06:41:06.470597023 +0300
+@@ -4483,12 +4483,14 @@
+         auto pos = name.find("blk.");
+         if (pos != 0) {
+             LLAMA_LOG_WARN("Oops: tensor with strange name %s\n", name.c_str());
++            ml.n_unknown++;
+             continue;
+         }
+         pos += 4;
+         auto pos1 = name.find('.', pos);
+         if (pos1 == std::string::npos) {
+             LLAMA_LOG_WARN("Oops: tensor with strange name %s\n", name.c_str());
++            ml.n_unknown++;
+             continue;
+         }
+         auto layer_string = name.substr(pos, pos1-pos);
+@@ -4499,6 +4501,7 @@
+         }
+         if (il < 0 || il >= model.hparams.n_layer) {
+             LLAMA_LOG_WARN("Oops: strange layer index %d for tensor %s\n", il, name.c_str());
++            ml.n_unknown++;
+             continue;
+         }
+         if (!model.mtp && model.hparams.nextn_predict_layers > 0 && il >= n_layer - model.hparams.nextn_predict_layers) {
+@@ -4532,6 +4535,7 @@
+             auto ttype = llm_tensor_type(model.arch, name, il);
+             if (ttype == LLM_TENSOR_UNKNOWN) {
+                 LLAMA_LOG_WARN("Oops: got unknown for tensor %s\n", name.c_str());
++                ml.n_unknown++;
+                 continue;
+             }
+             if (ttype == LLM_TENSOR_FFN_GATE_UP_EXPS || ttype == LLM_TENSOR_FFN_GATE_EXPS || ttype == LLM_TENSOR_FFN_UP_EXPS || ttype == LLM_TENSOR_FFN_DOWN_EXPS) {
+diff --git a/src/llama-hparams.cpp src/llama-hparams.cpp
+--- a/src/llama-hparams.cpp	2026-11-09 06:40:56.661384959 +0300
++++ b/src/llama-hparams.cpp	2026-11-09 06:41:06.471912714 +0300
+@@ -2450,41 +2450,42 @@
                      ml.get_key(LLM_KV_HASH_LAYER_COUNT, hparams.dsv4_hash_layer_count, false);
  
                      if (model.arch == LLM_ARCH_DEEPSEEK41) {
@@ -89,21 +112,10 @@ index 685355d9..054c3a22 100644
                          }
                      }
  
-diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
-index aba93035..040fca78 100644
---- a/src/llama-model-loader.cpp
-+++ b/src/llama-model-loader.cpp
-@@ -578,6 +578,7 @@ llama_model_loader::llama_model_loader(const std::string & fname, int ncmoe, boo
-             case GGML_TYPE_Q6_0_R4: ftype = LLAMA_FTYPE_MOSTLY_Q6_0_R4; break;
-             case GGML_TYPE_Q8_0_R8: ftype = LLAMA_FTYPE_MOSTLY_Q8_0_R8; break;
-             case GGML_TYPE_MXFP4:   ftype = LLAMA_FTYPE_MOSTLY_MXFP4;   break;
-+            case GGML_TYPE_F8_E4M3: ftype = LLAMA_FTYPE_MOSTLY_F8_E4M3; break;
-             case GGML_TYPE_NVFP4:   ftype = LLAMA_FTYPE_MOSTLY_NVFP4;   break;
-             case GGML_TYPE_NVFP4_KS:ftype = LLAMA_FTYPE_MOSTLY_NVFP4_KS;break;
-             case GGML_TYPE_IQ4_XS:  ftype = LLAMA_FTYPE_MOSTLY_IQ4_XS;  break;
-             case GGML_TYPE_IQ4_KS:  ftype = LLAMA_FTYPE_MOSTLY_IQ4_KS;  break;
-             case GGML_TYPE_IQ4_KS_R4:ftype = LLAMA_FTYPE_MOSTLY_IQ4_KS_R4;  break;
-@@ -1111,8 +1112,12 @@ void llama_model_loader::done_getting_tensors() const {
+diff --git a/src/llama-model-loader.cpp src/llama-model-loader.cpp
+--- a/src/llama-model-loader.cpp	2026-11-09 06:40:56.662384963 +0300
++++ b/src/llama-model-loader.cpp	2026-11-09 06:41:06.468693607 +0300
+@@ -1174,8 +1174,12 @@
          LLAMA_LOG_WARN("%s: skipped %d unused tensors (%.1f MiB) -- e.g. a NextN/MTP head when MTP is not requested; per-tensor detail at debug log level\n",
                  __func__, n_skipped, size_skipped / 1024.0 / 1024.0);
      }
@@ -118,11 +130,10 @@ index aba93035..040fca78 100644
      }
  }
  
-diff --git a/src/llama-model-loader.h b/src/llama-model-loader.h
-index 5633cc6c..e898cd4b 100644
---- a/src/llama-model-loader.h
-+++ b/src/llama-model-loader.h
-@@ -39,6 +39,7 @@ struct llama_model_loader {
+diff --git a/src/llama-model-loader.h src/llama-model-loader.h
+--- a/src/llama-model-loader.h	2026-11-09 06:40:56.662384963 +0300
++++ b/src/llama-model-loader.h	2026-11-09 06:41:06.467294104 +0300
+@@ -39,6 +39,7 @@
      int n_tensors = 0;
      int n_created = 0;
      int n_skipped = 0;
@@ -130,38 +141,3 @@ index 5633cc6c..e898cd4b 100644
      size_t size_skipped = 0;
  
      int64_t n_elements = 0;
-diff --git a/src/llama.cpp b/src/llama.cpp
-index 7bca8152..d705073d 100644
---- a/src/llama.cpp
-+++ b/src/llama.cpp
-@@ -4427,12 +4427,14 @@ static std::pair<std::vector<double>, double> get_layer_sizes(const llama_model_
-         auto pos = name.find("blk.");
-         if (pos != 0) {
-             LLAMA_LOG_WARN("Oops: tensor with strange name %s\n", name.c_str());
-+            ml.n_unknown++;
-             continue;
-         }
-         pos += 4;
-         auto pos1 = name.find('.', pos);
-         if (pos1 == std::string::npos) {
-             LLAMA_LOG_WARN("Oops: tensor with strange name %s\n", name.c_str());
-+            ml.n_unknown++;
-             continue;
-         }
-         auto layer_string = name.substr(pos, pos1-pos);
-@@ -4443,6 +4445,7 @@ static std::pair<std::vector<double>, double> get_layer_sizes(const llama_model_
-         }
-         if (il < 0 || il >= model.hparams.n_layer) {
-             LLAMA_LOG_WARN("Oops: strange layer index %d for tensor %s\n", il, name.c_str());
-+            ml.n_unknown++;
-             continue;
-         }
-         if (!model.mtp && model.hparams.nextn_predict_layers > 0 && il >= n_layer - model.hparams.nextn_predict_layers) {
-@@ -4476,6 +4479,7 @@ static std::pair<std::vector<double>, double> get_layer_sizes(const llama_model_
-             auto ttype = llm_tensor_type(model.arch, name, il);
-             if (ttype == LLM_TENSOR_UNKNOWN) {
-                 LLAMA_LOG_WARN("Oops: got unknown for tensor %s\n", name.c_str());
-+                ml.n_unknown++;
-                 continue;
-             }
-             if (ttype == LLM_TENSOR_FFN_GATE_UP_EXPS || ttype == LLM_TENSOR_FFN_GATE_EXPS || ttype == LLM_TENSOR_FFN_UP_EXPS || ttype == LLM_TENSOR_FFN_DOWN_EXPS) {
