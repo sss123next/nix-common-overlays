@@ -21,7 +21,7 @@ self: super: {
         fetchSubmodules = true;
       };
 
-      cargoHash = "sha256-6W2+rvCcY7GyCJa36Ld0mN3j/+dSS/SfaTwG0hxpdaw=";
+      cargoHash = "sha256-ILFHYKm4+pQ7OfGw3NY0xXrZaU0+9oCbVqAqGcz0ixI=";
 
       nativeBuildInputs = [
         pkg-config

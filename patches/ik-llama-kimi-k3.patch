@@ -1,20 +1,6 @@
-From: sss@dark-alexandr.net
-Date: Mon, 9 Nov 2026 02:00:00 +0300
-Subject: [PATCH] ik-llama-kimi-k3: add Kimi K3 architecture support
-
-Port of Kimi K3 (LLM_ARCH_KIMI_K3) from mainline llama.cpp (commit
-ad1de39e) to ik_llama.cpp. Hybrid architecture with KDA (linear) and
-MLA (full) attention layers, latent MoE, cross-layer residual scores,
-and situ activation.
-
-12 files changed, 516 insertions(+), 1 deletion(-)
-create mode 100644 src/graphs/build_kimi_k3.cpp
-
-diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index cbed99f0..5e911723 100644
---- a/src/CMakeLists.txt
-+++ b/src/CMakeLists.txt
-@@ -142,6 +142,7 @@ add_library(llama
+--- a/src/CMakeLists.txt	2026-11-09 05:47:25.929689917 +0300
++++ b/src/CMakeLists.txt	2026-11-09 05:50:31.885770035 +0300
+@@ -142,6 +142,7 @@
              graphs/build_bailingmoe3.cpp
              graphs/build_glm5next.cpp
              graphs/build_raon1.cpp
@@ -22,11 +8,8 @@ index cbed99f0..5e911723 100644
              graphs/build_xing4.cpp
              graphs/build_minimaxm2.cpp
              graphs/build_minimaxm3.cpp
-diff --git a/src/graphs/build_kimi_k3.cpp b/src/graphs/build_kimi_k3.cpp
-new file mode 100644
-index 00000000..0045ecec
---- /dev/null
-+++ b/src/graphs/build_kimi_k3.cpp
+--- a/src/graphs/build_kimi_k3.cpp	1970-01-01 03:00:00.000000000 +0300
++++ b/src/graphs/build_kimi_k3.cpp	2026-11-09 05:50:31.885893936 +0300
 @@ -0,0 +1,241 @@
 +#include "../llama-build-context.h"
 +#include "../llama-model.h"
@@ -269,11 +252,9 @@ index 00000000..0045ecec
 +    ggml_build_forward_expand(gf, cur);
 +    return gf;
 +}
-diff --git a/src/llama-arch.cpp b/src/llama-arch.cpp
-index 1f976426..ccbbae00 100644
---- a/src/llama-arch.cpp
-+++ b/src/llama-arch.cpp
-@@ -107,6 +107,7 @@ static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+--- a/src/llama-arch.cpp	2026-11-09 05:47:25.931550380 +0300
++++ b/src/llama-arch.cpp	2026-11-09 05:51:06.332438367 +0300
+@@ -107,6 +107,7 @@
      { LLM_ARCH_SPARK2_5,        "spark2_5"     },
      { LLM_ARCH_RAON1,           "raon1"        },
      { LLM_ARCH_XING4_0,         "xing4_0"      },
@@ -281,7 +262,22 @@ index 1f976426..ccbbae00 100644
      { LLM_ARCH_UNKNOWN,         "(unknown)"    },
  };
  
-@@ -397,6 +398,7 @@ bool llm_arch_is_hybrid(const llm_arch & arch) {
+@@ -165,12 +166,14 @@
+     { LLM_KV_EXPERT_WEIGHTS_SCALE,              "%s.expert_weights_scale"              },
+     { LLM_KV_EXPERT_WEIGHTS_NORM,               "%s.expert_weights_norm"               },
+     { LLM_KV_EXPERT_GATING_FUNC,                "%s.expert_gating_func"                },
++    { LLM_KV_EXPERT_LATENT_LENGTH,              "%s.expert_latent_length"              },
+     // K2 Horizon MoVA
+     { LLM_KV_ATTENTION_GROUPNORM_GROUPS,       "%s.attention.group_norm_groups"        },
+     { LLM_KV_ATTENTION_VALUE_EXPERT_COUNT,     "%s.attention.value_expert_count"       },
+     { LLM_KV_ATTENTION_VALUE_EXPERT_USED_COUNT,"%s.attention.value_expert_used_count"  },
+ 
+     { LLM_KV_NEXTN_PREDICT_LAYERS,              "%s.nextn_predict_layers"              },
++    { LLM_KV_ATTN_RES_BLOCK_SIZE,               "%s.attn_res.block_size"               },
+     { LLM_KV_NUM_DEEPSTACK_LAYERS,              "%s.n_deepstack_layers"                },
+     { LLM_KV_POOLING_TYPE,                      "%s.pooling_type"                      },
+     { LLM_KV_LOGIT_SCALE,                       "%s.logit_scale"                       },
+@@ -397,6 +400,7 @@
      case LLM_ARCH_LFM2MOE:
      case LLM_ARCH_LFM3:
      case LLM_ARCH_RAON1:
@@ -289,11 +285,9 @@ index 1f976426..ccbbae00 100644
          return true;
      default:
          return false;
-diff --git a/src/llama-arch.h b/src/llama-arch.h
-index 2e1abcd1..0804a5c0 100644
---- a/src/llama-arch.h
-+++ b/src/llama-arch.h
-@@ -105,6 +105,7 @@ enum llm_arch {
+--- a/src/llama-arch.h	2026-11-09 05:47:25.931550380 +0300
++++ b/src/llama-arch.h	2026-11-09 05:50:31.886070498 +0300
+@@ -105,6 +105,7 @@
      LLM_ARCH_SPARK2_5,
      LLM_ARCH_RAON1,
      LLM_ARCH_XING4_0,
@@ -301,7 +295,7 @@ index 2e1abcd1..0804a5c0 100644
      LLM_ARCH_UNKNOWN,
  };
  
-@@ -143,6 +144,7 @@ enum llm_kv {
+@@ -143,6 +144,7 @@
      LLM_KV_EXPERT_WEIGHTS_SCALE,
      LLM_KV_EXPERT_WEIGHTS_NORM,
      LLM_KV_EXPERT_GATING_FUNC,
@@ -309,7 +303,7 @@ index 2e1abcd1..0804a5c0 100644
      // K2 Horizon MoVA
      LLM_KV_ATTENTION_GROUPNORM_GROUPS,
      LLM_KV_ATTENTION_VALUE_EXPERT_COUNT,
-@@ -152,6 +154,7 @@ enum llm_kv {
+@@ -152,6 +154,7 @@
      LLM_KV_NUM_DEEPSTACK_LAYERS,
      LLM_KV_POOLING_TYPE,
      LLM_KV_LOGIT_SCALE,
@@ -317,7 +311,7 @@ index 2e1abcd1..0804a5c0 100644
      LLM_KV_DECODER_START_TOKEN_ID,
      LLM_KV_ATTN_LOGIT_SOFTCAPPING,
      LLM_KV_ROUTER_LOGIT_SOFTCAPPING,
-@@ -577,6 +580,14 @@ enum llm_tensor {
+@@ -577,6 +580,14 @@
      LLM_TENSOR_SHORTCONV_OUTPROJ,
      LLM_TENSOR_ATTN_VRES_LAMBDA,
  
@@ -332,11 +326,9 @@ index 2e1abcd1..0804a5c0 100644
      LLM_TENSOR_UNKNOWN,
  };
  
-diff --git a/src/llama-build-context.cpp b/src/llama-build-context.cpp
-index 3bd54f44..9f89483d 100644
---- a/src/llama-build-context.cpp
-+++ b/src/llama-build-context.cpp
-@@ -3443,6 +3443,10 @@ ggml_cgraph * llm_build_context::llama_build_graph(
+--- a/src/llama-build-context.cpp	2026-11-09 05:47:25.931550380 +0300
++++ b/src/llama-build-context.cpp	2026-11-09 05:50:31.886435215 +0300
+@@ -3443,6 +3443,10 @@
              {
                  result = llm.build_raon1();
              } break;
@@ -347,11 +339,9 @@ index 3bd54f44..9f89483d 100644
          case LLM_ARCH_XING4_0:
              {
                  result = llm.build_xing4();
-diff --git a/src/llama-build-context.h b/src/llama-build-context.h
-index fd1e4c9f..65a0200e 100644
---- a/src/llama-build-context.h
-+++ b/src/llama-build-context.h
-@@ -469,6 +469,7 @@ struct llm_build_context {
+--- a/src/llama-build-context.h	2026-11-09 05:47:25.931550380 +0300
++++ b/src/llama-build-context.h	2026-11-09 05:50:31.886699708 +0300
+@@ -469,6 +469,7 @@
      ggml_cgraph * build_bailingmoe3();
      ggml_cgraph * build_glm5next();
      ggml_cgraph * build_raon1();
@@ -359,11 +349,40 @@ index fd1e4c9f..65a0200e 100644
      ggml_cgraph * build_xing4();
  
      ggml_cgraph * build_glm5next_mtp();
-diff --git a/src/llama-hparams.cpp b/src/llama-hparams.cpp
-index 8f17274f..27a47594 100644
---- a/src/llama-hparams.cpp
-+++ b/src/llama-hparams.cpp
-@@ -1066,6 +1066,69 @@ void llm_load_hparams(
+--- a/src/llama.cpp	2026-11-09 05:49:28.348560815 +0300
++++ b/src/llama.cpp	2026-11-09 05:50:31.890573589 +0300
+@@ -10541,6 +10541,7 @@
+         case LLM_ARCH_JAIS:
+         case LLM_ARCH_GLM5NEXT:
+         case LLM_ARCH_GLM5NEXT_DASHED:
++        case LLM_ARCH_KIMI_K3:
+             return LLAMA_ROPE_TYPE_NONE;
+ 
+         // use what we call a normal RoPE, operating on pairs of consecutive head values
+--- a/src/llama-hparams.cpp	2026-11-09 05:49:28.347365252 +0300
++++ b/src/llama-hparams.cpp	2026-11-09 05:51:06.337079746 +0300
+@@ -8,7 +8,7 @@
+ #include <limits>
+ #include <map>
+ 
+-#define LLAMA_MAX_EXPERTS 512  // Qwen3 Next
++#define LLAMA_MAX_EXPERTS 1024 // Kimi K3
+ 
+ static const std::map<llama_rope_scaling_type, const char *> LLAMA_ROPE_SCALING_TYPES = {
+     { LLAMA_ROPE_SCALING_TYPE_NONE,   "none"   },
+@@ -1019,7 +1019,10 @@
+                 ml.get_key(LLM_KV_ATTENTION_VALUE_LENGTH_MLA,  hparams.n_embd_head_v_mla_impl);
+                 ml.get_key(LLM_KV_ATTENTION_Q_LORA_RANK,       hparams.n_lora_q);
+                 ml.get_key(LLM_KV_ATTENTION_KV_LORA_RANK,      hparams.n_lora_kv);
+-                ml.get_key(LLM_KV_ATTENTION_LATENT_NORM_RMS_EPS, hparams.f_norm_rms_eps_latent);
++                ml.get_key(LLM_KV_ATTENTION_LATENT_NORM_RMS_EPS, hparams.f_norm_rms_eps_latent, false);
++                if (hparams.f_norm_rms_eps_latent == 0.0f) {
++                    hparams.f_norm_rms_eps_latent = hparams.f_norm_rms_eps;
++                }
+ 
+                 ml.get_key(LLM_KV_SSM_CONV_KERNEL,             hparams.ssm_d_conv);
+                 ml.get_key(LLM_KV_SSM_INNER_SIZE,              hparams.ssm_d_inner, false);
+@@ -1066,6 +1069,72 @@
  
                  model.type = e_model::MODEL_UNKNOWN;
              } break;
@@ -374,7 +393,10 @@ index 8f17274f..27a47594 100644
 +                ml.get_key(LLM_KV_ATTENTION_VALUE_LENGTH_MLA,  hparams.n_embd_head_v_mla_impl);
 +                ml.get_key(LLM_KV_ATTENTION_Q_LORA_RANK,       hparams.n_lora_q);
 +                ml.get_key(LLM_KV_ATTENTION_KV_LORA_RANK,      hparams.n_lora_kv);
-+                ml.get_key(LLM_KV_ATTENTION_LATENT_NORM_RMS_EPS, hparams.f_norm_rms_eps_latent);
++                ml.get_key(LLM_KV_ATTENTION_LATENT_NORM_RMS_EPS, hparams.f_norm_rms_eps_latent, false);
++                if (hparams.f_norm_rms_eps_latent == 0.0f) {
++                    hparams.f_norm_rms_eps_latent = hparams.f_norm_rms_eps;
++                }
 +
 +                ml.get_key(LLM_KV_SSM_CONV_KERNEL,      hparams.ssm_d_conv);
 +                ml.get_key(LLM_KV_SSM_INNER_SIZE,        hparams.ssm_d_inner, false);
@@ -433,11 +455,9 @@ index 8f17274f..27a47594 100644
          case LLM_ARCH_QWEN35MOE:
              {
                  ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,        hparams.n_ff_exp, false);
-diff --git a/src/llama-hparams.h b/src/llama-hparams.h
-index 085c6ff3..8c4bacfa 100644
---- a/src/llama-hparams.h
-+++ b/src/llama-hparams.h
-@@ -116,6 +116,10 @@ struct llama_hparams {
+--- a/src/llama-hparams.h	2026-11-09 05:47:25.932550384 +0300
++++ b/src/llama-hparams.h	2026-11-09 05:50:31.887141112 +0300
+@@ -116,6 +116,10 @@
      bool     kda_safe_gate = false;
      float    kda_gate_lower_bound = 0.0f;
  
@@ -448,11 +468,9 @@ index 085c6ff3..8c4bacfa 100644
      // for hybrid state-space models (e.g. qwen3next)
      std::array<bool, LLAMA_MAX_LAYERS> recurrent_layer_arr;
  
-diff --git a/src/llama-load-tensors.cpp b/src/llama-load-tensors.cpp
-index 51f91309..fbbeca18 100644
---- a/src/llama-load-tensors.cpp
-+++ b/src/llama-load-tensors.cpp
-@@ -178,6 +178,7 @@ struct create_tensors_helper : public create_tensors_helper_interface {
+--- a/src/llama-load-tensors.cpp	2026-11-09 05:47:25.932550384 +0300
++++ b/src/llama-load-tensors.cpp	2026-11-09 05:50:31.887291693 +0300
+@@ -178,6 +178,7 @@
      bool create_bailingmoe3_tensors(const LLM_TN & tn);
      bool create_glm5next_tensors(const LLM_TN & tn);
      bool create_raon1_tensors(const LLM_TN & tn);
@@ -460,7 +478,7 @@ index 51f91309..fbbeca18 100644
      bool create_xing4_tensors(const LLM_TN & tn);
  
      bool create_minimaxm2_tensors(const LLM_TN & tn);
-@@ -5320,6 +5321,124 @@ bool create_tensors_helper::create_raon1_tensors(const LLM_TN & tn) {
+@@ -5320,6 +5321,124 @@
      return use_mmap_buffer;
  }
  
@@ -585,7 +603,7 @@ index 51f91309..fbbeca18 100644
  bool create_tensors_helper::create_ernie45_tensors(const LLM_TN & tn) {
      LOADING_PRELUDE
  
-@@ -6563,6 +6682,8 @@ bool create_tensors_helper::create_tensors() {
+@@ -6563,6 +6682,8 @@
              use_mmap_buffer = create_glm5next_tensors(tn); break;
          case LLM_ARCH_RAON1:
              use_mmap_buffer = create_raon1_tensors(tn); break;
@@ -594,15 +612,12 @@ index 51f91309..fbbeca18 100644
          case LLM_ARCH_XING4_0:
              use_mmap_buffer = create_xing4_tensors(tn); break;
          case LLM_ARCH_MINIMAX_M2:
-diff --git a/src/llama-model.cpp b/src/llama-model.cpp
-index b345e4ec..fce38aea 100644
---- a/src/llama-model.cpp
-+++ b/src/llama-model.cpp
-@@ -2597,6 +2597,61 @@ static const std::map<llm_arch, std::map<llm_tensor, std::string>> LLM_TENSOR_NA
-             { LLM_TENSOR_NEXTN_SHARED_HEAD_NORM, "blk.%d.nextn.shared_head_norm" },
+--- a/src/llama-model.cpp	2026-11-09 05:49:28.345780737 +0300
++++ b/src/llama-model.cpp	2026-11-09 05:50:31.889141958 +0300
+@@ -2598,6 +2598,61 @@
          },
      },
-+    {
+     {
 +        LLM_ARCH_KIMI_K3,
 +        {
 +            { LLM_TENSOR_TOKEN_EMBD,             "token_embd" },
@@ -657,10 +672,11 @@ index b345e4ec..fce38aea 100644
 +            { LLM_TENSOR_FFN_ROUTED_NORM,        "blk.%d.ffn_routed_norm" },
 +        },
 +    },
-     {
++    {
          LLM_ARCH_UNKNOWN,
          {
-@@ -2875,6 +2930,7 @@ const char * llama_model_type_name(e_model type) {
+             { LLM_TENSOR_TOKEN_EMBD,         "token_embd" },
+@@ -2876,6 +2931,7 @@
          case MODEL_235B_A22B:     return "235B.A22B";
          case MODEL_310B_A15B:     return "310B.A15B";
          case MODEL_312B_A17B:     return "312B.A17B";
@@ -668,11 +684,9 @@ index b345e4ec..fce38aea 100644
          case MODEL_300B_A47B:     return "300B.A47B";
          case MODEL_355B_A32B:     return "355B.A32B";
          case MODEL_397B_A17B:     return "397B.A17B";
-diff --git a/src/llama-model.h b/src/llama-model.h
-index df8a706d..e3fd1a4a 100644
---- a/src/llama-model.h
-+++ b/src/llama-model.h
-@@ -127,6 +127,7 @@ enum e_model {
+--- a/src/llama-model.h	2026-11-09 05:47:25.933550388 +0300
++++ b/src/llama-model.h	2026-11-09 05:50:31.889355816 +0300
+@@ -127,6 +127,7 @@
      MODEL_235B_A22B,
      MODEL_310B_A15B,
      MODEL_312B_A17B,
@@ -680,7 +694,7 @@ index df8a706d..e3fd1a4a 100644
      MODEL_300B_A47B, // Ernie MoE big
      MODEL_355B_A32B,
      MODEL_397B_A17B, // Qwen-3.5-MoE
-@@ -341,6 +342,14 @@ struct llama_layer {
+@@ -341,6 +342,14 @@
      struct ggml_tensor * attn_v_gate_b = nullptr;
      struct ggml_tensor * attn_v_exps   = nullptr;
  
@@ -695,7 +709,7 @@ index df8a706d..e3fd1a4a 100644
      llama_split_tensor split_ffn_up_shexp;
      llama_split_tensor split_ffn_gate_shexp;
      llama_split_tensor split_ffn_down_shexp;
-@@ -578,6 +587,7 @@ struct llama_model {
+@@ -578,6 +587,7 @@
      struct ggml_tensor * hc_head_base = nullptr;
      struct ggml_tensor * hc_head_fn = nullptr;
      struct ggml_tensor * hc_head_scale = nullptr;
@@ -703,7 +717,7 @@ index df8a706d..e3fd1a4a 100644
  
      // engram hash constants, indexed [engram layer][ngram] and [engram layer][(ngram-1)*n_head
      // + head]. They index straight into engram_embd, so the loader validates their counts.
-@@ -692,7 +702,7 @@ struct llama_model {
+@@ -692,7 +702,7 @@
      }
  
      bool is_mla_model() const {
@@ -712,15 +726,3 @@ index df8a706d..e3fd1a4a 100644
      }
  
      float swiglu_limit(uint32_t il, bool shared) const {
-diff --git a/src/llama.cpp b/src/llama.cpp
-index 71f65321..b177bbdc 100644
---- a/src/llama.cpp
-+++ b/src/llama.cpp
-@@ -10537,6 +10537,7 @@ enum llama_rope_type llama_rope_type(const struct llama_model * model) {
-         case LLM_ARCH_JAIS:
-         case LLM_ARCH_GLM5NEXT:
-         case LLM_ARCH_GLM5NEXT_DASHED:
-+        case LLM_ARCH_KIMI_K3:
-             return LLAMA_ROPE_TYPE_NONE;
- 
-         // use what we call a normal RoPE, operating on pairs of consecutive head values

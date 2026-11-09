@@ -1,0 +1,1241 @@
+--- a/common/common.cpp	2026-11-09 05:47:25.691549423 +0300
++++ b/common/common.cpp	2026-11-09 05:48:25.269786932 +0300
+@@ -2169,6 +2169,19 @@
+         params.fused_idx_topk = false;
+         return true;
+     }
++    if (arg == "--print-stats") {
++        params.print_stats = true;
++        return true;
++    }
++    if (arg == "--no-print-stats") {
++        params.print_stats = false;
++        return true;
++    }
++    if (arg == "--stats-interval") {
++        CHECK_ARG
++        params.log_stats_interval = std::stoi(argv[i]);
++        return true;
++    }
+     if (arg == "--swa-compress") {
+         params.swa_compress = true;
+         return true;
+@@ -3359,6 +3372,9 @@
+     options.push_back({ "*",           "       --verbose-prompt",       "print a verbose prompt before generation (default: %s)", params.verbose_prompt ? "true" : "false" });
+     options.push_back({ "*",           "-dr,   --dry-run",       "skip loading tensors in the files"});
+     options.push_back({ "*",           "       --no-display-prompt",    "don't print prompt at generation (default: %s)", !params.display_prompt ? "true" : "false" });
++    options.push_back({ "*",           "       --print-stats",          "print per-request timing stats to stderr (default: %s)", params.print_stats ? "enabled" : "disabled" });
++    options.push_back({ "*",           "       --no-print-stats",       "disable printing of tok/s timing stats to stderr (default: %s)", !params.print_stats ? "enabled" : "disabled" });
++    options.push_back({ "*",           "       --stats-interval N",     "interval in seconds between periodic per-slot stats lines on stderr (0 = off, default: %d)", params.log_stats_interval });
+     options.push_back({ "*",           "-co,   --color",                "colorize output to distinguish prompt and user input from generations (default: %s)", params.use_color ? "true" : "false" });
+     options.push_back({ "*",           "-s,    --seed SEED",            "RNG seed (default: %d, use random seed for < 0)", params.seed });
+     options.push_back({ "*",           "-t,    --threads N",            "number of threads to use during generation (default: %d)", params.n_threads });
+@@ -5904,6 +5920,8 @@
+     fprintf(stream, "adaptive_updt_w_cur: %s # default: false\n", sparams.adaptive_updt_w_cur ? "true" : "false");
+     fprintf(stream, "verbose_prompt: %s # default: false\n", params.verbose_prompt ? "true" : "false");
+     fprintf(stream, "display_prompt: %s # default: true\n", params.display_prompt ? "true" : "false");
++    fprintf(stream, "print_stats: %s # default: true\n", params.print_stats ? "true" : "false");
++    fprintf(stream, "log_stats_interval: %d # default: 3 (seconds between periodic per-slot stats lines)\n", params.log_stats_interval);
+ }
+ 
+ //
+--- a/common/common.h	2026-11-09 05:47:25.691549423 +0300
++++ b/common/common.h	2026-11-09 05:48:25.270494156 +0300
+@@ -473,6 +473,8 @@
+     bool use_mlock         = false; // use mlock to keep model in memory
+     bool verbose_prompt    = false; // print prompt tokens before generation
+     bool display_prompt    = true;  // print prompt before generation
++    bool print_stats       = true;  // print per-request timing stats (tok/s) to stderr
++    int32_t log_stats_interval = 3; // seconds between periodic per-slot stats lines to stderr (0 = off)
+     bool infill            = false; // use infill mode
+     bool dump_kv_cache     = false; // dump the KV cache contents for debugging purposes
+     bool no_kv_offload     = false; // disable KV offloading
+--- a/common/json-schema-to-grammar.cpp	2026-11-09 05:47:25.692862880 +0300
++++ b/common/json-schema-to-grammar.cpp	2026-11-09 05:48:25.274181697 +0300
+@@ -346,11 +346,28 @@
+     }
+ 
+     std::string _visit_pattern(const std::string & pattern, const std::string & name) {
+-        if (!(pattern.front() == '^' && pattern.back() == '$')) {
+-            _errors.push_back("Pattern must start with '^' and end with '$'");
+-            return "";
++        // JSON Schema pattern is not implicitly anchored (match anywhere).
++        // However, this converter builds a GBNF rule wrapped in "...", so it
++        // must match the entire string.  Strip explicit ^/$ anchors when
++        // present so the inner regex becomes the whole-string grammar.  A
++        // pattern without anchors is used as-is (full-string match, which is
++        // stricter than JSON Schema spec but the safest GBNG fallback).
++        if (pattern.empty()) {
++            return _add_rule(name, "\"\\\"\\\"\" space");
++        }
++        std::string sub_pattern = pattern;
++        if (pattern.size() >= 2 && pattern.front() == '^' && pattern.back() == '$') {
++            sub_pattern = pattern.substr(1, pattern.size() - 2);
++        } else if (pattern.front() == '^') {
++            sub_pattern = pattern.substr(1);
++        } else if (pattern.back() == '$') {
++            sub_pattern = pattern.substr(0, pattern.size() - 1);
++        } else {
++            // Per JSON Schema spec, pattern without anchors matches
++            // anywhere in the string.  For GBNF generation the safest
++            // fallback is full-string match, since we cannot easily
++            // express "contains" in the grammar.
+         }
+-        std::string sub_pattern = pattern.substr(1, pattern.length() - 2);
+         std::unordered_map<std::string, std::string> sub_rule_ids;
+ 
+         size_t i = 0;
+--- a/examples/server/server-context.cpp	2026-11-09 05:47:25.736549603 +0300
++++ b/examples/server/server-context.cpp	2026-11-09 05:48:25.270824860 +0300
+@@ -399,6 +399,8 @@
+ 
+         slot.params.speculative = params_base.speculative;
+         slot.sparams = params_base.sparams;
++        slot.print_stats    = params_base.print_stats;
++        slot.stats_interval = params_base.log_stats_interval;
+         // try speculative decoding
+         if (can_spec && requested_spec) {
+             switch (common_speculative_try_init(params_base.speculative, slot.ctx, &slot.spec)) {
+@@ -899,6 +901,8 @@
+ }
+ 
+ void server_slot::print_timings() const {
++    if (!print_stats) return;
++
+     char buffer[512];
+     double t_prompt = t_prompt_processing / n_prompt_tokens_processed;
+     double n_prompt_second = 1e3 / t_prompt_processing * n_prompt_tokens_processed;
+@@ -926,6 +930,222 @@
+         const_cast<common_params_speculative *>(&params.speculative));
+ }
+ 
++// Rows of the periodic stats (see gpt_params::log_stats_interval). The wording follows the
++// upstream llama.cpp rows; the field widths are fixed and wide enough for the values met in
++// practice (token counts up to millions, times/throughputs up to the tens of thousands), so
++// that consecutive rows of a request line up into a stable table.
++
++static std::string stats_row_prompt_processing(int32_t n_tokens, int32_t n_prompt_tokens, int64_t t_elapsed_us) {
++    const double t_elapsed = (double) t_elapsed_us / 1e6;
++    const double progress  = n_prompt_tokens > 0 ? (double) n_tokens / n_prompt_tokens : 0.0;
++    const double n_second  = t_elapsed > 0.0 ? n_tokens / t_elapsed : 0.0;
++
++    char buf[256];
++    snprintf(buf, sizeof(buf),
++        "prompt processing, n_tokens = %7d, progress = %6.2f, t = %8.2f s / %8.2f tokens per second",
++        (int) n_tokens, progress, t_elapsed, n_second);
++    return std::string(buf);
++}
++
++static std::string stats_row_generation(int32_t n_gen, double t_gen_s, double n_gen_second_win, int32_t interval_s) {
++    const double n_gen_second = t_gen_s > 0.0 ? n_gen / t_gen_s : 0.0;
++
++    char buf[256];
++    snprintf(buf, sizeof(buf),
++        "n_gen = %7d, tg = %8.2f t/s, tg_%ds = %8.2f t/s",
++        (int) n_gen, n_gen_second, (int) interval_s, n_gen_second_win);
++    return std::string(buf);
++}
++
++// Same prefix as SLT_INF(), but with the task id passed by value: the periodic stats thread
++// must not dereference slot.task, which the queue thread may free at any moment.
++static void log_stats_row(const char * fn, int32_t id, int32_t id_task, const std::string & row) {
++    LOG_INF("slot %12.*s: id %2d | task %d | %s\n", 12, fn, id, id_task, row.c_str());
++}
++
++void server_slot::print_timings_pp() const {
++    if (!print_stats || stats_interval <= 0) return;
++
++    // only report while the prompt is still being processed (t_start_generation is
++    // 0 until the first token has been decoded, i.e. prompt processing has finished)
++    if (t_start_process_prompt == 0 || t_start_generation != 0) {
++        return;
++    }
++
++    // t_prompt_processing is only finalized once generation starts, so measure the
++    // elapsed time directly from the moment prompt processing began
++    const int64_t t_elapsed_us = ggml_time_us() - t_start_process_prompt;
++
++    // the interval is also the minimum prompt-processing time worth reporting
++    if (t_elapsed_us < (int64_t) stats_interval * 1000000) {
++        return;
++    }
++
++    SLT_INF(*this, "%s\n", stats_row_prompt_processing(n_prompt_tokens_processed, n_prompt_tokens, t_elapsed_us).c_str());
++}
++
++// Snapshot the per-slot stats for the stats thread. Called from the queue thread only, at
++// points where the slot state is consistent (see the call sites in update_slots() and
++// release_slot_after_final_response()).
++void server_context::publish_slot_stats() {
++    std::lock_guard<std::mutex> lock(stats_mutex);
++
++    if (stats_snapshots.size() != slots.size()) {
++        stats_snapshots.resize(slots.size());
++    }
++
++    for (size_t i = 0; i < slots.size(); ++i) {
++        const server_slot & slot = slots[i];
++        slot_stats_snapshot & snap = stats_snapshots[i];
++
++        snap.id      = slot.id;
++        snap.task_id = slot.task != nullptr ? slot.task->id : -1;
++
++        snap.n_prompt_tokens         = slot.n_prompt_tokens;
++        snap.n_prompt_tokens_decoded = slot.n_prompt_tokens_processed;
++        snap.n_decoded               = slot.n_decoded;
++        snap.t_start_process_prompt  = slot.t_start_process_prompt;
++        snap.t_start_generation      = slot.t_start_generation;
++
++        if (!slot.print_stats) {
++            snap.phase = SLOT_STATS_IDLE;
++            continue;
++        }
++
++        if (slot.prompt_batch_i0 >= 0) {
++            // the slot has a prompt chunk queued for the decode that is about to run: it is
++            // not decoded yet, so only count the tokens of the previously decoded chunks
++            const int32_t n_in_flight = slot.prompt_batch_i1 - slot.prompt_batch_i0;
++            snap.n_prompt_tokens_decoded = std::max(0, slot.n_prompt_tokens_processed - n_in_flight);
++            snap.phase = SLOT_STATS_PROMPT;
++        } else if (slot.state == SLOT_STATE_PROCESSING && slot.t_start_generation != 0) {
++            snap.phase = SLOT_STATS_GENERATION;
++        } else {
++            // waiting for its prompt to be queued, embedding/decision task, or already released
++            snap.phase = SLOT_STATS_IDLE;
++        }
++    }
++}
++
++// Drop everything published for a slot. Called when the slot is released: the queue thread
++// may not reach another publish for a long time (it is about to block on the task queue), and
++// a stale snapshot would keep the stats thread printing rows for a slot that has nothing left
++// to report - a disconnected client used to leave a generation phase behind that way.
++void server_context::clear_slot_stats(int32_t slot_id) {
++    std::lock_guard<std::mutex> lock(stats_mutex);
++
++    if (slot_id >= 0 && (size_t) slot_id < stats_snapshots.size()) {
++        stats_snapshots[slot_id] = slot_stats_snapshot();
++    }
++}
++
++// Flag the slots the decode that is about to run will work on, so that the stats thread can
++// tell a slow decode (generation is happening, the counters just cannot move yet) from a slot
++// that merely sits in the processing state while nothing is being decoded.
++void server_context::mark_slots_decoding(bool on) {
++    std::lock_guard<std::mutex> lock(stats_mutex);
++
++    if (stats_snapshots.size() != slots.size()) {
++        return;
++    }
++
++    for (size_t i = 0; i < slots.size(); ++i) {
++        if (on) {
++            if (slots[i].i_batch >= 0) {
++                stats_snapshots[i].decoding = true;
++            }
++        } else {
++            stats_snapshots[i].decoding = false;
++        }
++    }
++}
++
++// Periodic per-slot stats, printed by the stats thread every gpt_params::log_stats_interval
++// seconds. The rows are built from the published snapshots, never from the slots directly.
++// A generating slot reports on every tick of its decode (a slow generation must not be
++// mistaken for a stalled one), a prompt row is printed only once a chunk was committed since
++// the previous tick, and a slot that is left in the processing state with nothing being
++// decoded stays silent.
++void server_context::print_periodic_stats() {
++    const int32_t interval_s = params_base.log_stats_interval;
++    if (interval_s <= 0) {
++        return;
++    }
++
++    std::vector<slot_stats_snapshot> snapshots;
++    {
++        std::lock_guard<std::mutex> lock(stats_mutex);
++        snapshots = stats_snapshots;
++    }
++
++    if (stats_windows.size() != snapshots.size()) {
++        stats_windows.assign(snapshots.size(), slot_stats_window());
++    }
++
++    const int64_t t_now = ggml_time_us();
++
++    for (size_t i = 0; i < snapshots.size(); ++i) {
++        const slot_stats_snapshot & snap = snapshots[i];
++        slot_stats_window & win = stats_windows[i];
++
++        if (snap.phase == SLOT_STATS_PROMPT) {
++            win.in_generation = false;
++
++            if (snap.n_prompt_tokens_decoded < win.n_prompt_last) {
++                // a new prompt started on this slot
++                win.n_prompt_last = 0;
++            }
++
++            // only the prompt chunks that finished since the previous tick are worth a row:
++            // a chunk still inside llama_decode() has no progress to report
++            const bool moved = snap.n_prompt_tokens_decoded != win.n_prompt_last;
++            win.n_prompt_last = snap.n_prompt_tokens_decoded;
++            if (!moved) {
++                continue;
++            }
++
++            log_stats_row("print_timings_pp", snap.id, snap.task_id,
++                stats_row_prompt_processing(snap.n_prompt_tokens_decoded, snap.n_prompt_tokens,
++                    t_now - snap.t_start_process_prompt));
++            continue;
++        }
++
++        if (snap.phase == SLOT_STATS_GENERATION) {
++            // the window starts at the first decoded token and then runs tick to tick, so
++            // that tg_<interval>s always covers the interval it is labelled with
++            if (!win.in_generation) {
++                win.in_generation = true;
++                win.t_last        = snap.t_start_generation;
++                win.n_gen_last    = 0;
++            }
++
++            const double t_window  = t_now > win.t_last ? (double)(t_now - win.t_last) / 1e6 : 0.0;
++            const double tg_window = t_window > 0.0 ? (snap.n_decoded - win.n_gen_last) / t_window : 0.0;
++            const double t_gen     = (double)(t_now - snap.t_start_generation) / 1e6;
++
++            const bool moved = snap.n_decoded != win.n_gen_last;
++
++            win.t_last     = t_now;
++            win.n_gen_last = snap.n_decoded;
++
++            // a slot that is decoding gets its row every interval, no exceptions: a slow
++            // generation must not look like a stalled one. A slot that merely carries the
++            // processing state around (finished, cancelled, waiting for its client) neither
++            // decodes nor reports, so it stays silent until it is released
++            if (!moved && !snap.decoding) {
++                continue;
++            }
++
++            log_stats_row("print_timings_tg", snap.id, snap.task_id,
++                stats_row_generation(snap.n_decoded, t_gen, tg_window, interval_s));
++            continue;
++        }
++
++        // idle: drop the bookkeeping, so that the next request starts from a clean window
++        win = slot_stats_window();
++    }
++}
++
+ void server_metrics::init() {
+     t_start = ggml_time_us();
+ }
+@@ -3661,6 +3881,10 @@
+                 {"truncated",       slot.truncated}
+                 });
+ 
++            // the slot has nothing to report anymore, and the queue thread may block before
++            // it publishes again: forget it now instead of leaving a phase behind
++            clear_slot_stats(slot.id);
++
+             queue_tasks.notify_slot_changed();
+         }
+     }
+@@ -4769,6 +4993,10 @@
+     slot.release();
+     slot.released = true;
+     metrics.on_prediction(slot);
++
++    // stop the periodic stats for this slot right away: the queue thread may not reach
++    // another decode (and therefore another publish) for a while
++    clear_slot_stats(slot.id);
+ }
+ 
+ void server_context::send_token_results(completion_token_outputs& results, server_slot& slot, int32_t n) {
+@@ -5079,7 +5307,9 @@
+             return n;
+         };
+ 
++        mark_slots_decoding(true);
+         const int ret = server_decode(ctx, batch_view);
++        mark_slots_decoding(false);
+         if (ret != 0) {
+             if (n_batch == 1 || ret < 0) {
+                 int user_cancel = -3;
+@@ -5250,6 +5480,9 @@
+             const int64_t t_current = ggml_time_us();
+ 
+             if (slot.n_decoded == 1) {
++                // final prompt-processing row: this is the only place where the exact total
++                // prompt-processing time is known (also for prompts fitting into one batch)
++                slot.print_timings_pp();
+                 slot.t_start_generation = ggml_time_us();
+                 slot.t_prompt_processing = (slot.t_start_generation - slot.t_start_process_prompt) / 1e3;
+                 metrics.on_prompt_eval(slot);
+@@ -5457,6 +5690,10 @@
+         }
+     }
+ 
++    // publish the per-slot stats before the (potentially long) decode, so that the periodic
++    // stats thread reports what is queued for this iteration
++    publish_slot_stats();
++
+     // process the created batch of tokens
+     process_batch_tokens(n_batch); // Decode with batch
+ 
+--- a/examples/server/server-context.h	2026-11-09 05:47:25.736549603 +0300
++++ b/examples/server/server-context.h	2026-11-09 05:48:25.271300348 +0300
+@@ -7,6 +7,7 @@
+ 
+ #include <cstddef>
+ #include <memory>
++#include <mutex>
+ #include <vector>
+ 
+ 
+@@ -31,6 +32,8 @@
+ 
+     struct slot_params params;
+ 
++    bool print_stats = true; // print per-request timing stats (tok/s) to stderr
++    int32_t stats_interval = 0; // seconds between periodic stats lines (0 = off), copied from gpt_params
+     bool released = false;
+     slot_state state = SLOT_STATE_IDLE;
+     slot_command command = SLOT_COMMAND_NONE;
+@@ -211,6 +214,7 @@
+     size_t find_stopping_strings(const std::string& text, const size_t last_token_size, bool is_full_stop);
+ 
+     void print_timings() const;
++    void print_timings_pp() const; // final prompt-processing row, printed when generation starts
+ 
+ };
+ 
+@@ -237,6 +241,40 @@
+     void reset_bucket();
+ };
+ 
++// Periodic per-slot stats (gpt_params::log_stats_interval). The queue thread publishes
++// snapshots (it is the only thread allowed to touch server_slot), the stats thread prints
++// them at the requested interval, so that the rows keep their cadence even while the queue
++// thread is blocked inside llama_decode(). A slot reports while it is working: a generating
++// slot on every tick of its decode (a slow generation must not be mistaken for a stalled
++// one), a prompt-processing slot only once a chunk was committed since the previous tick,
++// and a slot that sits in the processing state without a decode running stays silent.
++enum slot_stats_phase {
++    SLOT_STATS_IDLE,
++    SLOT_STATS_PROMPT,
++    SLOT_STATS_GENERATION,
++};
++
++struct slot_stats_snapshot {
++    slot_stats_phase phase = SLOT_STATS_IDLE;
++    int32_t id            = -1;
++    int32_t task_id       = -1;
++    int32_t n_prompt_tokens         = 0;
++    int32_t n_prompt_tokens_decoded = 0; // prompt tokens whose decode has completed
++    int32_t n_decoded               = 0;
++    int64_t t_start_process_prompt  = 0;
++    int64_t t_start_generation      = 0;
++    bool    decoding                = false; // a decode covering this slot is in flight
++};
++
++// per-slot bookkeeping of the stats thread: the counters as of the previous tick, used both
++// as the tg_<interval>s window and to tell whether a prompt chunk was committed since then
++struct slot_stats_window {
++    bool    in_generation = false;
++    int64_t t_last        = 0; // time of the previous tick
++    int32_t n_prompt_last = 0; // prompt tokens decoded at the previous tick
++    int32_t n_gen_last    = 0; // tokens generated at the previous tick
++};
++
+ struct server_context {
+     llama_model* model = nullptr;
+     llama_context* ctx = nullptr;
+@@ -278,6 +316,12 @@
+ 
+     server_metrics metrics;
+ 
++    // periodic per-slot stats: stats_snapshots is published by the queue thread (under
++    // stats_mutex), stats_windows belongs to the stats thread
++    std::mutex                       stats_mutex;
++    std::vector<slot_stats_snapshot> stats_snapshots;
++    std::vector<slot_stats_window>   stats_windows;
++
+     common_chat_templates_ptr chat_templates;
+     server_chat_params  chat_params;
+     std::map<std::string, bool> chat_template_caps;
+@@ -365,6 +409,14 @@
+ 
+     void update_slots();
+ 
++    void publish_slot_stats();
++
++    void clear_slot_stats(int32_t slot_id);
++
++    void mark_slots_decoding(bool on);
++
++    void print_periodic_stats();
++
+     void release_slots();
+ 
+     bool slots_idle();
+--- a/examples/server/server.cpp	2026-11-09 05:47:25.736549603 +0300
++++ b/examples/server/server.cpp	2026-11-09 05:48:25.271463150 +0300
+@@ -2427,11 +2427,37 @@
+     SetConsoleCtrlHandler(reinterpret_cast<PHANDLER_ROUTINE>(console_ctrl_handler), true);
+ #endif
+ 
++    // Periodic per-slot stats (see gpt_params::log_stats_interval), emitted to stderr through
++    // common_log, like the per-request timing stats. Printed from a dedicated thread, so that
++    // the rows keep their cadence even while the queue thread is busy inside llama_decode()
++    // (a single prompt chunk can take minutes on a large context).
++    std::atomic<bool> stats_stop{false};
++    std::thread stats_thread;
++    if (params.log_stats_interval > 0) {
++        const int64_t interval_ms = params.log_stats_interval * 1000;
++        stats_thread = std::thread([&]() {
++            while (!stats_stop.load() && state.load() == SERVER_STATE_READY) {
++                std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
++                if (stats_stop.load()) {
++                    break;
++                }
++                ctx_server.print_periodic_stats();
++            }
++        });
++    }
++
++    // note: start_loop() blocks until the queue is terminated, so it must come last
+     ctx_server.queue_tasks.start_loop();
+ 
+     svr->stop();
+     t.join();
+ 
++    // stop the periodic stats thread and wait for it before main's locals go out of scope
++    stats_stop.store(true);
++    if (stats_thread.joinable()) {
++        stats_thread.join();
++    }
++
+     llama_backend_free();
+ 
+     return 0;
+--- a/ggml/include/ggml.h	2026-11-09 05:47:25.769856133 +0300
++++ b/ggml/include/ggml.h	2026-11-09 05:48:25.276786960 +0300
+@@ -384,6 +384,7 @@
+     GGML_API void        ggml_fp32_to_bf16_row_ref(const float *, ggml_bf16_t *, int64_t);
+     GGML_API void        ggml_fp32_to_bf16_row(const float *, ggml_bf16_t *, int64_t);
+ 
++    typedef struct { uint8_t bits; } ggml_fp8_e4m3_t;
+     struct ggml_object;
+     struct ggml_context;
+ 
+@@ -428,6 +429,7 @@
+         GGML_TYPE_NVFP4     = 40,
+         GGML_TYPE_Q1_0_G128 = 41,  // Bonsai 1-bit quants
+         GGML_TYPE_Q2_0      = 42,  // same type id as mainline GGML_TYPE_Q2_0
++        GGML_TYPE_F8_E4M3   = 43,  // OCP FP8 E4M3 (same ID as mainline)
+         //
+         //
+         GGML_TYPE_Q8_0_X4 = 97,
+@@ -508,7 +510,7 @@
+         GGML_TYPE_Q8_K_R16   = 397,
+         GGML_TYPE_Q8_KV_R8   = 398,
+         GGML_TYPE_Q8_K_R8    = 399,
+-        GGML_TYPE_COUNT,
++        GGML_TYPE_COUNT = 400,
+     };
+ 
+     // precision
+@@ -552,6 +554,7 @@
+         GGML_FTYPE_MOSTLY_MXFP4   = 25, // except 1d tensors, using 26 to be compatible with mainline
+         GGML_FTYPE_MOSTLY_Q4_0_4_4 = 26, // except 1d tensors
+         GGML_FTYPE_MOSTLY_Q4_0_4_8 = 27, // except 1d tensors
++        GGML_FTYPE_MOSTLY_F8_E4M3  = 42, // except 1d tensors
+         GGML_FTYPE_MOSTLY_Q4_0_8_8 = 28, // except 1d tensors
+         GGML_FTYPE_MOSTLY_Q1_0_128 = 29, // except 1d tensors
+         //
+--- a/ggml/src/ggml.c	2026-11-09 05:47:25.786549802 +0300
++++ b/ggml/src/ggml.c	2026-11-09 05:48:25.279786972 +0300
+@@ -694,6 +694,19 @@
+         .nrows                    = 1,
+         .row_meta_size            = 0,
+     },
++    [GGML_TYPE_F8_E4M3] = {
++        .type_name                = "f8_e4m3",
++        .blck_size                = 1,
++        .type_size                = sizeof(ggml_fp8_e4m3_t),
++        .is_quantized             = false,
++        .to_float                 = (ggml_to_float_t) dequantize_row_f8_e4m3,
++        .from_float               = quantize_row_f8_e4m3,
++        .from_float_ref           = (ggml_from_float_t) quantize_row_f8_e4m3_ref,
++        .vec_dot                  = NULL,
++        .vec_dot_type             = GGML_TYPE_COUNT,
++        .nrows                    = 1,
++        .row_meta_size            = 0,
++    },
+     [GGML_TYPE_Q4_0] = {
+         .type_name                = "q4_0",
+         .blck_size                = QK4_0,
+@@ -32119,6 +32132,12 @@
+                 ggml_fp32_to_fp16_row(src + start, (ggml_fp16_t *)dst + start, n);
+                 result = n * elemsize;
+             } break;
++        case GGML_TYPE_F8_E4M3:
++            {
++                size_t elemsize = sizeof(ggml_fp8_e4m3_t);
++                quantize_row_f8_e4m3(src + start, (char *) dst + start_row * row_size, n);
++                result = n * elemsize;
++            } break;
+         case GGML_TYPE_BF16:
+             {
+                 size_t elemsize = sizeof(ggml_bf16_t);
+--- a/ggml/src/ggml-impl.h	2026-11-09 05:47:25.781918899 +0300
++++ b/ggml/src/ggml-impl.h	2026-11-09 05:48:25.277290175 +0300
+@@ -802,3 +802,31 @@
+ #ifdef __cplusplus
+ }
+ #endif
++
++// OCP FP8 E4M3 conversion (signed, 4 exp + 3 mantissa, E4M3)
++static inline float ggml_f8_e4m3_to_fp32(uint8_t x) {
++    const uint8_t ax = x & 0x7F;
++    if (ax == 0x7F) { return NAN; }
++    const int exp = (ax >> 3) & 0xF;
++    const int man = ax & 0x7;
++    const float value = exp == 0
++        ? ldexpf((float) man, -9)
++        : ldexpf(1.0f + (float) man / 8.0f, exp - 7);
++    return x & 0x80 ? -value : value;
++}
++
++static inline uint8_t ggml_fp32_to_f8_e4m3(float x) {
++    const uint8_t sign = signbit(x) ? 0x80 : 0;
++    x = fabsf(x);
++    if (isnan(x)) { return 0x7F; }
++    if (x == 0.0f) { return sign; }
++    if (isinf(x) || x >= 448.0f) { return sign | 0x7E; }
++    if (x < 0.015625f) { return sign | (uint8_t)(int)(x * 512.0f + 0.5f); }
++    int exp;
++    const float mantissa = frexpf(x, &exp) * 2.0f;
++    int encoded_exp = exp + 6;
++    int encoded_man = (int)((mantissa - 1.0f) * 8.0f + 0.5f);
++    if (encoded_man == 8) { encoded_man = 0; encoded_exp++; }
++    if (encoded_exp > 15 || (encoded_exp == 15 && encoded_man > 6)) { return sign | 0x7E; }
++    return sign | (uint8_t)(encoded_exp << 3) | (uint8_t)encoded_man;
++}
+--- a/ggml/src/ggml-quants.h	2026-11-09 05:47:25.783549790 +0300
++++ b/ggml/src/ggml-quants.h	2026-11-09 05:48:25.277351636 +0300
+@@ -72,6 +72,7 @@
+ void quantize_row_iq1_bn (const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
+ void quantize_row_iq1_s  (const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
+ void quantize_row_iq1_m  (const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
++void quantize_row_f8_e4m3(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
+ 
+ // Dequantization
+ void dequantize_row_q2_0(const block_q2_0 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+@@ -96,6 +97,7 @@
+ void dequantize_row_iq3_xxs(const block_iq3_xxs * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void dequantize_row_iq1_s  (const block_iq1_s   * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void dequantize_row_iq1_m  (const block_iq1_m   * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
++void dequantize_row_f8_e4m3(const ggml_fp8_e4m3_t * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void dequantize_row_iq4_nl (const block_iq4_nl  * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void dequantize_row_iq4_xs (const block_iq4_xs  * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void dequantize_row_iq3_s  (const block_iq3_s   * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+--- a/ggml/src/iqk/iqk_quantize.cpp	2026-11-09 05:47:25.791549822 +0300
++++ b/ggml/src/iqk/iqk_quantize.cpp	2026-11-09 05:48:25.280786976 +0300
+@@ -12440,3 +12440,28 @@
+     }
+     return true;
+ }
++
++// ======================== FP8 E4M3 (OCP) ========================
++
++void quantize_row_f8_e4m3_ref(const float * GGML_RESTRICT x, ggml_fp8_e4m3_t * GGML_RESTRICT y, int64_t k) {
++    for (int64_t i = 0; i < k; ++i) {
++        y[i].bits = ggml_fp32_to_f8_e4m3(x[i]);
++    }
++}
++
++void quantize_row_f8_e4m3(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k) {
++    quantize_row_f8_e4m3_ref(x, (ggml_fp8_e4m3_t *)y, k);
++}
++
++size_t quantize_f8_e4m3(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrows, int64_t n_per_row, const float * imatrix, const struct quantize_user_data * use_data) {
++    GGML_UNUSED(imatrix);
++    GGML_UNUSED(use_data);
++    quantize_row_f8_e4m3_ref(src, (ggml_fp8_e4m3_t *)dst, nrows * n_per_row);
++    return nrows * n_per_row * sizeof(ggml_fp8_e4m3_t);
++}
++
++void dequantize_row_f8_e4m3(const ggml_fp8_e4m3_t * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
++    for (int64_t i = 0; i < k; ++i) {
++        y[i] = ggml_f8_e4m3_to_fp32(x[i].bits);
++    }
++}
+--- a/ggml/src/iqk/iqk_quantize.h	2026-11-09 05:47:25.791549822 +0300
++++ b/ggml/src/iqk/iqk_quantize.h	2026-11-09 05:48:25.281134372 +0300
+@@ -363,6 +363,12 @@
+ void   dequantize_row_mxfp4_r8(const block_mxfp4_r8 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void   vec_dot_mxfp4_r8_q8_2_x4(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, size_t bx, const void * GGML_RESTRICT vy, size_t by, int nrc);
+ 
++
++// FP8 E4M3 (OCP) - byte-sized, non-quantized
++void   quantize_row_f8_e4m3_ref(const float * GGML_RESTRICT x, ggml_fp8_e4m3_t * GGML_RESTRICT y, int64_t k);
++void   quantize_row_f8_e4m3(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
++size_t quantize_f8_e4m3(const float * GGML_RESTRICT src, void * GGML_RESTRICT dst, int64_t nrows, int64_t n_per_row, const float * imatrix, const struct quantize_user_data * use_data);
++void   dequantize_row_f8_e4m3(const ggml_fp8_e4m3_t * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
+ void iqk_quantize_row_q8_K(const float * GGML_RESTRICT x, void * GGML_RESTRICT vy, int64_t k);
+ void quantize_row_q8_K64_ref(const float * GGML_RESTRICT x, block_q8_K64 * GGML_RESTRICT y, int64_t k);
+ void quantize_row_q8_K64(const float * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
+--- a/include/llama.h	2026-11-09 05:47:25.822787969 +0300
++++ b/include/llama.h	2026-11-09 05:48:25.281226564 +0300
+@@ -194,6 +194,7 @@
+         LLAMA_FTYPE_MOSTLY_MXFP4         = 38, // except 1d tensors, 38 to be compatible with mainline
+         LLAMA_FTYPE_MOSTLY_NVFP4         = 39,
+         LLAMA_FTYPE_MOSTLY_Q1_0_G128     = 41, // except 1d tensors, 38 to be compatible with mainline
++        LLAMA_FTYPE_MOSTLY_F8_E4M3       = 42, // except 1d tensors
+         //
+         LLAMA_FTYPE_MOSTLY_Q6_0          = 135, // except 1d tensors
+         LLAMA_FTYPE_MOSTLY_IQ1_BN        = 136, // except 1d tensors
+--- a/spm-headers/ggml.h	2026-11-09 05:47:25.769856133 +0300
++++ b/spm-headers/ggml.h	2026-11-09 05:48:25.276786960 +0300
+@@ -384,6 +384,7 @@
+     GGML_API void        ggml_fp32_to_bf16_row_ref(const float *, ggml_bf16_t *, int64_t);
+     GGML_API void        ggml_fp32_to_bf16_row(const float *, ggml_bf16_t *, int64_t);
+ 
++    typedef struct { uint8_t bits; } ggml_fp8_e4m3_t;
+     struct ggml_object;
+     struct ggml_context;
+ 
+@@ -428,6 +429,7 @@
+         GGML_TYPE_NVFP4     = 40,
+         GGML_TYPE_Q1_0_G128 = 41,  // Bonsai 1-bit quants
+         GGML_TYPE_Q2_0      = 42,  // same type id as mainline GGML_TYPE_Q2_0
++        GGML_TYPE_F8_E4M3   = 43,  // OCP FP8 E4M3 (same ID as mainline)
+         //
+         //
+         GGML_TYPE_Q8_0_X4 = 97,
+@@ -508,7 +510,7 @@
+         GGML_TYPE_Q8_K_R16   = 397,
+         GGML_TYPE_Q8_KV_R8   = 398,
+         GGML_TYPE_Q8_K_R8    = 399,
+-        GGML_TYPE_COUNT,
++        GGML_TYPE_COUNT = 400,
+     };
+ 
+     // precision
+@@ -552,6 +554,7 @@
+         GGML_FTYPE_MOSTLY_MXFP4   = 25, // except 1d tensors, using 26 to be compatible with mainline
+         GGML_FTYPE_MOSTLY_Q4_0_4_4 = 26, // except 1d tensors
+         GGML_FTYPE_MOSTLY_Q4_0_4_8 = 27, // except 1d tensors
++        GGML_FTYPE_MOSTLY_F8_E4M3  = 42, // except 1d tensors
+         GGML_FTYPE_MOSTLY_Q4_0_8_8 = 28, // except 1d tensors
+         GGML_FTYPE_MOSTLY_Q1_0_128 = 29, // except 1d tensors
+         //
+--- a/spm-headers/llama.h	2026-11-09 05:47:25.822787969 +0300
++++ b/spm-headers/llama.h	2026-11-09 05:48:25.281226564 +0300
+@@ -194,6 +194,7 @@
+         LLAMA_FTYPE_MOSTLY_MXFP4         = 38, // except 1d tensors, 38 to be compatible with mainline
+         LLAMA_FTYPE_MOSTLY_NVFP4         = 39,
+         LLAMA_FTYPE_MOSTLY_Q1_0_G128     = 41, // except 1d tensors, 38 to be compatible with mainline
++        LLAMA_FTYPE_MOSTLY_F8_E4M3       = 42, // except 1d tensors
+         //
+         LLAMA_FTYPE_MOSTLY_Q6_0          = 135, // except 1d tensors
+         LLAMA_FTYPE_MOSTLY_IQ1_BN        = 136, // except 1d tensors
+--- a/src/graphs/build_kimi_k3.cpp	1970-01-01 03:00:00.000000000 +0300
++++ b/src/graphs/build_kimi_k3.cpp	2026-11-09 05:48:25.289406929 +0300
+@@ -0,0 +1,241 @@
++#include "../llama-build-context.h"
++#include "../llama-model.h"
++#include "../llama-context.h"
++#include "../llama-delta-net.h"
++
++#include <cmath>
++
++//
++// Kimi-K3 text model: hybrid KDA (linear) + MLA (full) attention, as in kimi-linear.
++// Parts that kimi-linear does not have:
++//   1. cross-layer residual attention  (attn_res_block_size)
++//   2. latent MoE                      (routed experts run at n_expert_latent)
++//   3. situ activation                 (replaces SwiGLU everywhere)
++//   4. MLA output gate                 (sigmoid gate before o_proj)
++//   5. full-rank KDA gate              (single ssm_g instead of ssm_g_a/ssm_g_b)
++//
++
++static ggml_tensor * kimi_k3_situ(
++        ggml_context * ctx0,
++        ggml_tensor * gate,
++        ggml_tensor * up,
++        float situ_beta,
++        float situ_linear_beta) {
++    // situ_simple(gate, up) = tanh(gate/beta) * sigmoid(gate) * up
++    // situ_linear: multiply by tanh(up/linear_beta) when linear_beta > 0
++    auto g = ggml_mul(ctx0,
++            ggml_mul(ctx0,
++                ggml_tanh(ctx0, ggml_scale(ctx0, gate, 1.0f / situ_beta)),
++                ggml_sigmoid(ctx0, gate)),
++            up);
++    if (situ_linear_beta > 0.0f) {
++        g = ggml_mul(ctx0, g, ggml_tanh(ctx0, ggml_scale(ctx0, up, 1.0f / situ_linear_beta)));
++    }
++    return g;
++}
++
++static ggml_tensor * kimi_k3_res_mix(
++        ggml_context * ctx0,
++        ggml_tensor * cur,
++        ggml_tensor * score,
++        const llm_build_cb & cb,
++        int il) {
++    if (!score) return cur;
++    // Element-wise gate: cur += score * cur
++    // In mainline this is a full cross-layer softmax over a checkpoint bank;
++    // simplified here since ik_llama lacks the per-token state machinery.
++    auto s = ggml_mul(ctx0, score, cur);
++    cb(s, "res_mix", il);
++    return ggml_add(ctx0, cur, s);
++}
++
++ggml_cgraph * llm_build_context::build_kimi_k3() {
++    ggml_cgraph * gf = new_graph_custom();
++
++    const int64_t n_tokens            = this->n_tokens;
++    const int64_t n_outputs           = this->n_outputs;
++    const int64_t n_head              = hparams.n_head();
++    const int64_t attn_res_block_size = hparams.attn_res_block_size;
++    const int64_t n_expert_latent     = hparams.n_expert_latent;
++    const int64_t n_embd_head_v_mla   = hparams.n_embd_head_v_mla();
++    const int64_t n_embd_head_k_mla   = hparams.n_embd_head_k_mla();
++    const int64_t n_embd_head_qk_nope = n_embd_head_k_mla - hparams.n_rot;
++    const float   situ_beta           = hparams.situ_beta;
++    const float   situ_linear_beta    = hparams.situ_linear_beta;
++    const bool    use_attn_res        = attn_res_block_size > 0;
++    const bool    use_latent_moe      = n_expert_latent > 0;
++
++    delta_net delta(lctx, batch);
++
++    auto * inp_out_ids = (n_outputs != n_tokens) ? build_inp_out_ids() : nullptr;
++    auto * KQ_mask = build_inp_KQ_mask();
++
++    lctx.inp_s_seq_qnext = ggml_new_tensor_2d(ctx0, GGML_TYPE_I32, 1, n_tokens);
++    cb(lctx.inp_s_seq_qnext, "inp_s_seq_qnext", -1);
++    ggml_set_input(lctx.inp_s_seq_qnext);
++
++    ggml_tensor * inp = llm_build_inp_embd(ctx0, lctx, hparams, batch, model.tok_embd, cb);
++    ggml_tensor * inpL = inp;
++    ggml_tensor * prefix_sum = inpL;
++
++    for (int il = 0; il < (int) hparams.n_layer; ++il) {
++        const auto & layer = model.layers[il];
++
++        // ---- attention block ----
++        // build_layer_attn_kda handles its own norm internally;
++        // for MLA we build norm explicitly below.
++        ggml_tensor * cur = nullptr;
++
++        if (hparams.is_recurrent(il)) {
++            // KDA layer via ik's delta_net (norm + QKV + conv1d + scan + gate built in)
++            cur = delta.build_layer_attn_kda(ctx0, gf, prefix_sum, inp_out_ids, il, cb, /*add_residual=*/false);
++            cb(cur, "kda_out", il);
++        } else {
++            // MLA layer (nope-only, no RoPE)
++            // Need to norm before attention (KDA does its own, MLA does not)
++            cur = llm_build_norm(ctx0, prefix_sum, hparams, layer.attn_norm, nullptr, LLM_NORM_RMS, cb, il);
++            cb(cur, "attn_norm", il);
++
++            // Q down-projection
++            auto q_a = ggml_mul_mat(ctx0, layer.wq_a, cur);
++            auto q_a_norm = llm_build_norm(ctx0, q_a, hparams, layer.attn_q_a_norm, nullptr, LLM_NORM_RMS, cb, il);
++            auto q_b = ggml_mul_mat(ctx0, layer.wq_b, q_a_norm);
++            cb(q_b, "q", il);
++
++            // KV down-projection (nope-only: all kv_lora_rank used as key)
++            auto kv_a = ggml_mul_mat(ctx0, layer.wkv_a_mqa, cur);
++            auto kv_a_norm = llm_build_norm(ctx0, kv_a, hparams, layer.attn_kv_a_norm, nullptr, LLM_NORM_RMS, cb, il);
++            // K_B: [n_embd_head_qk_nope, kv_lora_rank, n_head]
++            auto k_b = ggml_mul_mat(ctx0, layer.wk_b, ggml_cont(ctx0, ggml_transpose(ctx0, kv_a_norm)));
++            k_b = ggml_cont(ctx0, ggml_transpose(ctx0, k_b));
++            // V_B: [kv_lora_rank, n_embd_head_v_mla, n_head]
++            auto v = ggml_mul_mat(ctx0, layer.wv_b, ggml_cont(ctx0, ggml_transpose(ctx0, kv_a_norm)));
++            v = ggml_cont(ctx0, ggml_transpose(ctx0, v));
++
++            // Build K and V tensors
++            auto Kcur = ggml_reshape_4d(ctx0, k_b, n_embd_head_qk_nope, 1, n_head, n_tokens);
++            auto Vcur = ggml_reshape_4d(ctx0, v, n_embd_head_v_mla, 1, n_head, n_tokens);
++
++            // Transpose Q to [n_embd_head_k_mla, n_head, n_tokens] for score computation
++            ggml_tensor * q = ggml_reshape_4d(ctx0, q_b, n_embd_head_k_mla, 1, n_head, n_tokens);
++            auto KQ = ggml_mul_mat(ctx0,
++                    ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, Kcur, n_embd_head_qk_nope, n_head * n_tokens))),
++                    ggml_reshape_2d(ctx0, q, n_embd_head_k_mla, n_head * n_tokens));
++            KQ = ggml_reshape_4d(ctx0, KQ, 1, n_tokens, n_head, n_tokens);
++
++            // Attention softmax
++            auto KQ_scaled = ggml_scale(ctx0, KQ, 1.0f / sqrtf((float) n_embd_head_k_mla));
++            auto KQ_masked = ggml_diag_mask_inf(ctx0, KQ_scaled, 0);
++            auto KQ_soft = ggml_soft_max_ext(ctx0, KQ_masked, KQ_mask, 1.0f, 1.0f);
++            cb(KQ_soft, "attn_soft", il);
++
++            // V attention
++            auto V_attn = ggml_mul_mat(ctx0,
++                    ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, Vcur, n_embd_head_v_mla, n_head * n_tokens))),
++                    ggml_reshape_2d(ctx0, KQ_soft, n_tokens, n_head * n_tokens));
++            auto o = ggml_reshape_4d(ctx0, V_attn, n_embd_head_v_mla, 1, n_head, n_tokens);
++
++            // Output projection
++            o = ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, o, n_head * n_embd_head_v_mla, n_tokens)));
++            // MLA output gate (sigmoid)
++            auto attn_gate = ggml_sigmoid(ctx0, ggml_mul_mat(ctx0, layer.attn_gate, cur));
++            o = ggml_mul(ctx0, attn_gate, o);
++            cur = ggml_mul_mat(ctx0, layer.wo, o);
++            cb(cur, "attn_out", il);
++        }
++
++        // Cross-layer attention residual
++        if (use_attn_res) {
++            cur = kimi_k3_res_mix(ctx0, cur, layer.attn_res_score, cb, il);
++        }
++
++        prefix_sum = ggml_add(ctx0, prefix_sum, cur);
++        prefix_sum = lctx.cvec.apply_to(ctx0, prefix_sum, il);
++        cb(prefix_sum, "prefix_sum_attn", il);
++
++        // ---- FFN block ----
++        cur = llm_build_norm(ctx0, prefix_sum, hparams, layer.ffn_norm, nullptr, LLM_NORM_RMS, cb, il);
++        cb(cur, "ffn_norm", il);
++
++        if ((uint32_t) il < hparams.n_layer_dense_lead) {
++            // Dense FFN with situ activation
++            auto g = ggml_mul_mat(ctx0, layer.ffn_gate, cur);
++            auto u = ggml_mul_mat(ctx0, layer.ffn_up,   cur);
++            cur = ggml_mul_mat(ctx0, layer.ffn_down, kimi_k3_situ(ctx0, g, u, situ_beta, situ_linear_beta));
++            cb(cur, "ffn_out", il);
++        } else {
++            // MoE: gating + routed experts + shared expert
++            // Use ff_n as intermediate size for the dense-lead case too,
++            // but for MoE we use n_ff_exp as per-layer expert width.
++            auto moe_out = llm_build_moe_ffn(ctx0, lctx, cur,
++                    layer.ffn_gate_inp, nullptr,
++                    layer.ffn_up_exps, nullptr,
++                    layer.ffn_gate_exps, nullptr,
++                    layer.ffn_down_exps, nullptr,
++                    layer.ffn_exp_probs_b,
++                    hparams.n_expert, hparams.n_expert_used,
++                    LLM_FFN_SITU, hparams.expert_weights_norm,
++                    true, hparams.expert_weights_scale,
++                    (llm_expert_gating_func_type) hparams.expert_gating_func,
++                    cb, il, gf, false,
++                    nullptr, nullptr, nullptr, nullptr, nullptr);
++            cb(moe_out, "moe_out", il);
++
++            // Shared expert (full-dim, situ activation)
++            auto ffn_shexp = llm_build_ffn(ctx0, lctx, nullptr, cur,
++                    layer.ffn_up_shexp,   nullptr, nullptr,
++                    layer.ffn_gate_shexp, nullptr, nullptr,
++                    layer.ffn_down_shexp, nullptr, nullptr,
++                    nullptr,
++                    LLM_FFN_SITU, LLM_FFN_PAR, cb, il);
++            cb(ffn_shexp, "ffn_shexp", il);
++
++            // Latent MoE routed (if present)
++            if (use_latent_moe && layer.ffn_routed_down) {
++                auto routed = ggml_mul_mat(ctx0, layer.ffn_routed_down, cur);
++                routed = llm_build_norm(ctx0, routed, hparams, layer.ffn_routed_norm, nullptr, LLM_NORM_RMS, cb, il);
++                auto g_routed = ggml_mul_mat(ctx0, layer.ffn_gate, routed);
++                auto u_routed = ggml_mul_mat(ctx0, layer.ffn_up,   routed);
++                routed = ggml_mul_mat(ctx0, layer.ffn_down, kimi_k3_situ(ctx0, g_routed, u_routed, situ_beta, situ_linear_beta));
++                routed = ggml_mul_mat(ctx0, layer.ffn_routed_up, routed);
++                cb(routed, "latent_moe", il);
++                cur = ggml_add(ctx0, ggml_add(ctx0, moe_out, ffn_shexp), routed);
++            } else {
++                cur = ggml_add(ctx0, moe_out, ffn_shexp);
++            }
++            ggml_build_forward_expand(gf, cur);
++        }
++
++        // Cross-layer FFN residual
++        if (use_attn_res) {
++            cur = kimi_k3_res_mix(ctx0, cur, layer.ffn_res_score, cb, il);
++        }
++
++        prefix_sum = ggml_add(ctx0, prefix_sum, cur);
++        prefix_sum = lctx.cvec.apply_to(ctx0, prefix_sum, il);
++        cb(prefix_sum, "l_out", il);
++
++        inpL = prefix_sum;
++    }
++
++    // ---- final ----
++    auto cur = inpL;
++
++    // Output cross-layer residual mix
++    if (use_attn_res) {
++        cur = kimi_k3_res_mix(ctx0, cur, model.output_res_score, cb, -1);
++    }
++
++    if (inp_out_ids) {
++        cur = ggml_get_rows(ctx0, cur, inp_out_ids);
++    }
++
++    cur = llm_build_norm(ctx0, cur, hparams, model.output_norm, nullptr, LLM_NORM_RMS, cb, -1);
++    cb(cur, "result_norm", -1);
++
++    cur = llm_build_lora_mm(lctx, ctx0, model.output, cur);
++    cb(cur, "result_output", -1);
++
++    ggml_build_forward_expand(gf, cur);
++    return gf;
++}
+--- a/src/llama-arch.cpp	2026-11-09 05:47:25.931550380 +0300
++++ b/src/llama-arch.cpp	2026-11-09 05:49:07.776956387 +0300
+@@ -165,12 +165,14 @@
+     { LLM_KV_EXPERT_WEIGHTS_SCALE,              "%s.expert_weights_scale"              },
+     { LLM_KV_EXPERT_WEIGHTS_NORM,               "%s.expert_weights_norm"               },
+     { LLM_KV_EXPERT_GATING_FUNC,                "%s.expert_gating_func"                },
++    { LLM_KV_EXPERT_LATENT_LENGTH,              "%s.expert_latent_length"              },
+     // K2 Horizon MoVA
+     { LLM_KV_ATTENTION_GROUPNORM_GROUPS,       "%s.attention.group_norm_groups"        },
+     { LLM_KV_ATTENTION_VALUE_EXPERT_COUNT,     "%s.attention.value_expert_count"       },
+     { LLM_KV_ATTENTION_VALUE_EXPERT_USED_COUNT,"%s.attention.value_expert_used_count"  },
+ 
+     { LLM_KV_NEXTN_PREDICT_LAYERS,              "%s.nextn_predict_layers"              },
++    { LLM_KV_ATTN_RES_BLOCK_SIZE,               "%s.attn_res.block_size"               },
+     { LLM_KV_NUM_DEEPSTACK_LAYERS,              "%s.n_deepstack_layers"                },
+     { LLM_KV_POOLING_TYPE,                      "%s.pooling_type"                      },
+     { LLM_KV_LOGIT_SCALE,                       "%s.logit_scale"                       },
+--- a/src/llama.cpp	2026-11-09 05:47:25.935550396 +0300
++++ b/src/llama.cpp	2026-11-09 05:48:25.285786996 +0300
+@@ -4483,12 +4483,14 @@
+         auto pos = name.find("blk.");
+         if (pos != 0) {
+             LLAMA_LOG_WARN("Oops: tensor with strange name %s\n", name.c_str());
++            ml.n_unknown++;
+             continue;
+         }
+         pos += 4;
+         auto pos1 = name.find('.', pos);
+         if (pos1 == std::string::npos) {
+             LLAMA_LOG_WARN("Oops: tensor with strange name %s\n", name.c_str());
++            ml.n_unknown++;
+             continue;
+         }
+         auto layer_string = name.substr(pos, pos1-pos);
+@@ -4499,6 +4501,7 @@
+         }
+         if (il < 0 || il >= model.hparams.n_layer) {
+             LLAMA_LOG_WARN("Oops: strange layer index %d for tensor %s\n", il, name.c_str());
++            ml.n_unknown++;
+             continue;
+         }
+         if (!model.mtp && model.hparams.nextn_predict_layers > 0 && il >= n_layer - model.hparams.nextn_predict_layers) {
+@@ -4532,6 +4535,7 @@
+             auto ttype = llm_tensor_type(model.arch, name, il);
+             if (ttype == LLM_TENSOR_UNKNOWN) {
+                 LLAMA_LOG_WARN("Oops: got unknown for tensor %s\n", name.c_str());
++                ml.n_unknown++;
+                 continue;
+             }
+             if (ttype == LLM_TENSOR_FFN_GATE_UP_EXPS || ttype == LLM_TENSOR_FFN_GATE_EXPS || ttype == LLM_TENSOR_FFN_UP_EXPS || ttype == LLM_TENSOR_FFN_DOWN_EXPS) {
+--- a/src/llama-hparams.cpp	2026-11-09 05:47:25.932550384 +0300
++++ b/src/llama-hparams.cpp	2026-11-09 05:48:25.291787020 +0300
+@@ -8,7 +8,7 @@
+ #include <limits>
+ #include <map>
+ 
+-#define LLAMA_MAX_EXPERTS 512  // Qwen3 Next
++#define LLAMA_MAX_EXPERTS 1024 // Kimi K3
+ 
+ static const std::map<llama_rope_scaling_type, const char *> LLAMA_ROPE_SCALING_TYPES = {
+     { LLAMA_ROPE_SCALING_TYPE_NONE,   "none"   },
+@@ -2450,41 +2450,42 @@
+                     ml.get_key(LLM_KV_HASH_LAYER_COUNT, hparams.dsv4_hash_layer_count, false);
+ 
+                     if (model.arch == LLM_ARCH_DEEPSEEK41) {
+-                        ml.get_arr_n(LLM_KV_ENGRAM_LAYER_IDS, hparams.engram_n_layer);
+-                        if (hparams.engram_n_layer == 0 || hparams.engram_n_layer > LLAMA_MAX_LAYERS) {
+-                            throw std::runtime_error(format("DeepSeek-V4.1 engram layer count %u is out of range", hparams.engram_n_layer));
+-                        }
+-                        {
+-                            std::vector<uint32_t> ids;
+-                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_LAYER_IDS), ids);
+-                            std::copy_n(ids.begin(), std::min<size_t>(ids.size(), LLAMA_MAX_LAYERS), hparams.engram_layer_ids.begin());
+-                        }
+-                        ml.get_key(LLM_KV_ENGRAM_HEAD_COUNT,     hparams.engram_n_head);
+-                        ml.get_key(LLM_KV_ENGRAM_KEY_LENGTH,     hparams.engram_key_length);
+-                        ml.get_key(LLM_KV_ENGRAM_MAX_NGRAM_SIZE, hparams.engram_max_ngram_size);
+-                        ml.get_key(LLM_KV_ENGRAM_PAD_ID,         model.engram_pad_id);
+-                        if (hparams.engram_n_head == 0 || hparams.engram_max_ngram_size < 2) {
+-                            throw std::runtime_error("DeepSeek-V4.1 engram needs at least one head and a 2-gram");
+-                        }
+-                        for (uint32_t e = 0; e < hparams.engram_n_layer; ++e) {
+-                            if (hparams.engram_layer_ids[e] >= hparams.n_layer) {
+-                                throw std::runtime_error(format("engram layer %u is out of range", hparams.engram_layer_ids[e]));
++                        if (ml.get_arr_n(LLM_KV_ENGRAM_LAYER_IDS, hparams.engram_n_layer, false)) {
++                            if (hparams.engram_n_layer == 0 || hparams.engram_n_layer > LLAMA_MAX_LAYERS) {
++                                throw std::runtime_error(format("DeepSeek-V4.1 engram layer count %u is out of range", hparams.engram_n_layer));
++                            }
++                            {
++                                std::vector<uint32_t> ids;
++                                ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_LAYER_IDS), ids);
++                                std::copy_n(ids.begin(), std::min<size_t>(ids.size(), LLAMA_MAX_LAYERS), hparams.engram_layer_ids.begin());
++                            }
++                            ml.get_key(LLM_KV_ENGRAM_HEAD_COUNT,     hparams.engram_n_head);
++                            ml.get_key(LLM_KV_ENGRAM_KEY_LENGTH,     hparams.engram_key_length);
++                            ml.get_key(LLM_KV_ENGRAM_MAX_NGRAM_SIZE, hparams.engram_max_ngram_size);
++                            ml.get_key(LLM_KV_ENGRAM_PAD_ID,         model.engram_pad_id);
++                            if (hparams.engram_n_head == 0 || hparams.engram_max_ngram_size < 2) {
++                                throw std::runtime_error("DeepSeek-V4.1 engram needs at least one head and a 2-gram");
++                            }
++                            for (uint32_t e = 0; e < hparams.engram_n_layer; ++e) {
++                                if (hparams.engram_layer_ids[e] >= hparams.n_layer) {
++                                    throw std::runtime_error(format("engram layer %u is out of range", hparams.engram_layer_ids[e]));
++                                }
++                            }
++                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_MULTIPLIERS), model.engram_multipliers);
++                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_PRIMES),      model.engram_primes);
++                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_OFFSETS),     model.engram_offsets);
++                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_TOKEN_MAP),   model.engram_token_map);
++                            const size_t n_bucket = (size_t) (hparams.engram_max_ngram_size - 1) * hparams.engram_n_head;
++                            if (model.engram_multipliers.size() != (size_t) hparams.engram_n_layer * hparams.engram_max_ngram_size) {
++                                throw std::runtime_error("engram multiplier count does not match layers * ngram size");
++                            }
++                            if (model.engram_primes.size() != (size_t) hparams.engram_n_layer * n_bucket ||
++                                model.engram_offsets.size() != model.engram_primes.size()) {
++                                throw std::runtime_error("engram prime or offset count does not match layers * buckets");
++                            }
++                            for (uint64_t p : model.engram_primes) {
++                                if (p == 0) throw std::runtime_error("engram prime of zero would divide by zero in the hash");
+                             }
+-                        }
+-                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_MULTIPLIERS), model.engram_multipliers);
+-                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_PRIMES),      model.engram_primes);
+-                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_OFFSETS),     model.engram_offsets);
+-                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_TOKEN_MAP),   model.engram_token_map);
+-                        const size_t n_bucket = (size_t) (hparams.engram_max_ngram_size - 1) * hparams.engram_n_head;
+-                        if (model.engram_multipliers.size() != (size_t) hparams.engram_n_layer * hparams.engram_max_ngram_size) {
+-                            throw std::runtime_error("engram multiplier count does not match layers * ngram size");
+-                        }
+-                        if (model.engram_primes.size() != (size_t) hparams.engram_n_layer * n_bucket ||
+-                            model.engram_offsets.size() != model.engram_primes.size()) {
+-                            throw std::runtime_error("engram prime or offset count does not match layers * buckets");
+-                        }
+-                        for (uint64_t p : model.engram_primes) {
+-                            if (p == 0) throw std::runtime_error("engram prime of zero would divide by zero in the hash");
+                         }
+                     }
+ 
+--- a/src/llama-model.cpp	2026-11-09 05:47:25.933550388 +0300
++++ b/src/llama-model.cpp	2026-11-09 05:48:25.281523185 +0300
+@@ -2728,6 +2728,7 @@
+         case LLAMA_FTYPE_MOSTLY_NVFP4:    return "NVFP4 - 4.5 bpw";
+         case LLAMA_FTYPE_MOSTLY_NVFP4_KS: return "NVFP4_KS - 4.5 bpw";
+         case LLAMA_FTYPE_MOSTLY_Q1_0_G128:return "Q1_0_G128 - 1.125 bpw";
++        case LLAMA_FTYPE_MOSTLY_F8_E4M3:  return "F8_E4M3 - 8.0 bpw";
+         case LLAMA_FTYPE_MOSTLY_Q1_0_G128_R8:return "Q1_0_G128_R8";
+         case LLAMA_FTYPE_MOSTLY_IQ4_XS:   return "IQ4_XS - 4.25 bpw";
+         case LLAMA_FTYPE_MOSTLY_IQ4_KS:   return "IQ4_KS - 4.25 bpw";
+--- a/src/llama-model-loader.cpp	2026-11-09 05:47:25.933550388 +0300
++++ b/src/llama-model-loader.cpp	2026-11-09 05:48:25.285361236 +0300
+@@ -579,6 +579,7 @@
+             case GGML_TYPE_Q6_0_R4: ftype = LLAMA_FTYPE_MOSTLY_Q6_0_R4; break;
+             case GGML_TYPE_Q8_0_R8: ftype = LLAMA_FTYPE_MOSTLY_Q8_0_R8; break;
+             case GGML_TYPE_MXFP4:   ftype = LLAMA_FTYPE_MOSTLY_MXFP4;   break;
++            case GGML_TYPE_F8_E4M3: ftype = LLAMA_FTYPE_MOSTLY_F8_E4M3; break;
+             case GGML_TYPE_NVFP4:   ftype = LLAMA_FTYPE_MOSTLY_NVFP4;   break;
+             case GGML_TYPE_NVFP4_KS:ftype = LLAMA_FTYPE_MOSTLY_NVFP4_KS;break;
+             case GGML_TYPE_IQ4_XS:  ftype = LLAMA_FTYPE_MOSTLY_IQ4_XS;  break;
+@@ -1074,6 +1075,11 @@
+     struct ggml_tensor * tensor = ggml_dup_tensor(ctx, cur);
+     ggml_set_name(tensor, ggml_get_name(cur));
+ 
++    // F8_E4M3 is not natively supported in ik_llama ops; relabel as F32
++    if (cur->type == GGML_TYPE_F8_E4M3) {
++        tensor->type = GGML_TYPE_F32;
++    }
++
+     if (duplicated) {
+         size_data += ggml_nbytes(cur);
+     } else {
+@@ -1351,14 +1357,39 @@
+ }
+ 
+ // for backwards compatibility, does not support ggml-backend
++// For F8_E4M3 conversion on load
++static inline float f8_e4m3_to_f32(uint8_t bits) {
++    const uint8_t ax = bits & 0x7F;
++    if (ax == 0x7F) { return NAN; }
++    const int exp = (ax >> 3) & 0xF;
++    const int man = ax & 0x7;
++    const float value = exp == 0
++        ? ldexpf((float) man, -9)
++        : ldexpf(1.0f + (float) man / 8.0f, exp - 7);
++    return bits & 0x80 ? -value : value;
++}
++
+ void llama_model_loader::load_data_for(struct ggml_tensor * cur) const {
+     const auto & w = require_weight(ggml_get_name(cur));
++    const enum ggml_type file_type = w.tensor->type;
++    const bool is_f8 = (file_type == GGML_TYPE_F8_E4M3);
+ 
+     if (!w.nvfp4_scale.empty()) {
+         read_nvfp4_rows(w, *files.at(w.idx), cur, (uint8_t *) cur->data, 0, ggml_nrows(cur));
+     } else if (use_mmap) {
+         const auto & mapping = mappings.at(w.idx);
+-        if (cur->data == nullptr) {
++        if (is_f8) {
++            // F8_E4M3 → F32: cannot mmap directly (size mismatch). Must have buffer.
++            GGML_ASSERT(cur->data != nullptr);
++            const size_t nbytes_f8 = ggml_nelements(cur) * 1;
++            memcpy(cur->data, (uint8_t *)mapping->addr() + w.offs, nbytes_f8);
++            const int64_t n = ggml_nelements(cur);
++            const uint8_t * src = (const uint8_t *)cur->data;
++            float * dst = (float *)cur->data;
++            for (int64_t i = n - 1; i >= 0; --i) {
++                dst[i] = f8_e4m3_to_f32(src[i]);
++            }
++        } else if (cur->data == nullptr) {
+             cur->data = (uint8_t *)mapping->addr() + w.offs;
+         } else {
+             memcpy(cur->data, (uint8_t *)mapping->addr() + w.offs, ggml_nbytes(cur));
+@@ -1367,8 +1398,21 @@
+         GGML_ASSERT(cur->data != nullptr);
+         GGML_ASSERT(w.idx < files.size());
+         const auto & file = files.at(w.idx);
+-        file->seek(w.offs, SEEK_SET);
+-        file->read_raw(cur->data, ggml_nbytes(cur));
++        if (is_f8) {
++            const size_t nbytes_f8 = ggml_nelements(cur) * 1;
++            std::vector<uint8_t> buf_f8(nbytes_f8);
++            file->seek(w.offs, SEEK_SET);
++            file->read_raw(buf_f8.data(), nbytes_f8);
++            const int64_t n = ggml_nelements(cur);
++            const uint8_t * src = (const uint8_t *)buf_f8.data();
++            float * dst = (float *)cur->data;
++            for (int64_t i = 0; i < n; ++i) {
++                dst[i] = f8_e4m3_to_f32(src[i]);
++            }
++        } else {
++            file->seek(w.offs, SEEK_SET);
++            file->read_raw(cur->data, ggml_nbytes(cur));
++        }
+     }
+ 
+     if (check_tensors && !ggml_validate_row_data(cur->type, cur->data, ggml_nbytes(cur))) {
+--- a/src/llama-model-loader.h	2026-11-09 05:47:25.933550388 +0300
++++ b/src/llama-model-loader.h	2026-11-09 05:48:25.285458247 +0300
+@@ -39,6 +39,7 @@
+     int n_tensors = 0;
+     int n_created = 0;
+     int n_skipped = 0;
++    mutable int n_unknown = 0;
+     size_t size_skipped = 0;
+ 
+     int64_t n_elements = 0;
+--- a/src/llama-quantize.cpp	2026-11-09 05:47:25.933550388 +0300
++++ b/src/llama-quantize.cpp	2026-11-09 05:48:25.281699258 +0300
+@@ -1352,6 +1352,7 @@
+         case LLAMA_FTYPE_MOSTLY_MXFP4:   default_type = GGML_TYPE_MXFP4;   break;
+         case LLAMA_FTYPE_MOSTLY_MXFP4_R8:default_type = GGML_TYPE_MXFP4_R8;break;
+         case LLAMA_FTYPE_MOSTLY_NVFP4_KS:default_type = GGML_TYPE_NVFP4_KS;break;
++        case LLAMA_FTYPE_MOSTLY_F8_E4M3:  default_type = GGML_TYPE_F8_E4M3;  break;
+         case LLAMA_FTYPE_MOSTLY_Q1_0_G128: default_type = GGML_TYPE_Q1_0_G128; break;
+         case LLAMA_FTYPE_MOSTLY_Q1_0_G128_R8: default_type = GGML_TYPE_Q1_0_G128_R8; break;
+         case LLAMA_FTYPE_MOSTLY_IQ4_XS:  default_type = GGML_TYPE_IQ4_XS;  break;
