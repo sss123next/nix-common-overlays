@@ -35,10 +35,15 @@ self: super: {
           ./patches/ik-llama-stats-interval.patch
           ./patches/ik-llama-fix-vk-host-buffer.patch
           ./patches/ik-llama-json-schema-pattern.patch
-#          ./patches/ik-llama-f8-e4m3.patch
-#          ./patches/ik-llama-kimi-k3.patch
-#          ./patches/ik-llama-deepseek41-kimi-fix.patch
+          ./patches/ik-llama-f8-e4m3.patch
+          ./patches/ik-llama-kimi-k3.patch
+          ./patches/ik-llama-deepseek41-kimi-fix.patch
         ];
+
+        # Build includes build_kimi_k3.cpp from patches
+        prePatch = ''
+          cp ${./patches/build_kimi_k3.cpp} src/graphs/build_kimi_k3.cpp
+        '';
 
         # Базовый уровень инструкций — AVX2. -march=native не использовать:
         # сборка идёт на удалённых билдерах, целевая машина неизвестна.
@@ -72,6 +77,10 @@ self: super: {
               'set(BUILD_NUMBER ${buildNumber})' \
             --replace-fail 'set(BUILD_COMMIT "unknown")' \
               'set(BUILD_COMMIT "${buildCommit}")'
+
+          # build_kimi_k3.cpp копируется prePatch, но CMakeLists.txt
+          # перечисляет графы явно — добавляем в список.
+          sed -i '/graphs\/build_spark2_5.cpp/a\            graphs\/build_kimi_k3.cpp' src/CMakeLists.txt
         '';
 
         cmakeFlags = with self.lib; [

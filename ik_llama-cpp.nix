@@ -40,6 +40,11 @@ self: super: {
         ];
 
 
+        # Build includes build_kimi_k3.cpp from patches
+        prePatch = ''
+          cp ${./patches/build_kimi_k3.cpp} src/graphs/build_kimi_k3.cpp
+        '';
+
         # Базовый уровень инструкций — AVX2. -march=native не использовать:
         # сборка идёт на удалённых билдерах, целевая машина неизвестна.
         # ggml сам включает -mavx/-mavx2/-mfma (GGML_AVX/AVX2=ON при
@@ -66,6 +71,10 @@ self: super: {
               'set(BUILD_NUMBER ${buildNumber})' \
             --replace-fail 'set(BUILD_COMMIT "unknown")' \
               'set(BUILD_COMMIT "${buildCommit}")'
+
+          # build_kimi_k3.cpp копируется prePatch, но CMakeLists.txt
+          # перечисляет графы явно — добавляем в список.
+          sed -i '/graphs\/build_spark2_5.cpp/a\            graphs/build_kimi_k3.cpp' src/CMakeLists.txt
         '';
 
         cmakeFlags = with self.lib; [
