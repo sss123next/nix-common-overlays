@@ -165,3 +165,24 @@
      cparams.grouped_expert_routing = params.grouped_expert_routing;
      cparams.fused_up_gate    = params.fused_up_gate;
      cparams.fused_mmad       = params.fused_mmad;
+
+--- a/ggml/src/ggml.c	2026-11-10 14:46:44.864727150 +0300
++++ b/ggml/src/ggml.c	2026-11-11 00:00:28.163055148 +0300
+@@ -8620,11 +8620,11 @@ struct ggml_tensor * ggml_mul_mat_id(
+     GGML_ASSERT(ids->ne[1] == b->ne[2]); // must have an expert list per b row
+     //// can_mul_mat
+-    //if (as->ne[0] != b->ne[0]) {
+-    //    fprintf(stderr, "MUL_MAT_ID_FAIL: as='%s' ne[0]=%ld type=%s | b='%s' ne[0]=%ld type=%s | ids->ne[1]=%ld b->ne[2]=%ld as->ne[1]=%ld as->ne[2]=%ld\n",
+-    //            as->name, (long)as->ne[0], ggml_type_name(as->type),
+-    //            b->name, (long)b->ne[0], ggml_type_name(b->type),
+-    //            (long)ids->ne[1], (long)b->ne[2], (long)as->ne[1], (long)as->ne[2]);
+-    //    fflush(stderr);
+-    //}
++    if (as->ne[0] != b->ne[0]) {
++        fprintf(stderr, "MUL_MAT_ID_FAIL: as='%s' ne[0]=%ld type=%s | b='%s' ne[0]=%ld type=%s | ids->ne[1]=%ld b->ne[2]=%ld as->ne[1]=%ld as->ne[2]=%ld\n",
++                as->name, (long)as->ne[0], ggml_type_name(as->type),
++                b->name, (long)b->ne[0], ggml_type_name(b->type),
++                (long)ids->ne[1], (long)b->ne[2], (long)as->ne[1], (long)as->ne[2]);
++        fflush(stderr);
++    }
+     GGML_ASSERT(as->ne[0] == b->ne[0]); // can_mul_mat
