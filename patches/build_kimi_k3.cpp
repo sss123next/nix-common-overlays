@@ -101,9 +101,6 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
         if (hparams.is_recurrent(il)) {
             cur = delta.build_layer_attn_kda(ctx0, gf, prefix_sum, inp_out_ids, il, cb, /*add_residual=*/false);
             cb(cur, "kda_out", il);
-            LLAMA_LOG_WARN("kda: cur ne0=%zu ne1=%zu\n", cur->ne[0], cur->ne[1]);
-            cur = ggml_cont(ctx0, ggml_transpose(ctx0, cur));
-            LLAMA_LOG_WARN("kda: after transpose ne0=%zu ne1=%zu\n", cur->ne[0], cur->ne[1]);
         } else {
             // MLA layer (nope-only, no RoPE)
             // Need to norm before attention (KDA does its own, MLA does not)
