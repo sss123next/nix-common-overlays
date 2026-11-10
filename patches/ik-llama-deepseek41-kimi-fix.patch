@@ -134,7 +134,7 @@
                      }
  
 --- a/src/llama.cpp	2026-11-10 14:46:44.864727150 +0300
-+++ b/src/llama.cpp	2026-11-10 14:46:44.889882130 +0300
++++ b/src/llama.cpp	2026-11-11 00:00:28.163055148 +0300
 @@ -4455,6 +4455,10 @@
                  continue;
              }
@@ -157,3 +157,11 @@
              continue;
          }
          if (name == "dflash_fc.weight" || name == "dflash_hidden_norm.weight" ||
+@@ -9578,6 +9586,7 @@
+     cparams.mla_attn         = params.mla_attn;
+     cparams.attn_max_batch   = params.attn_max_batch;
+     cparams.fused_moe_up_gate= params.fused_moe_up_gate;
++    if (model->arch == LLM_ARCH_KIMI_K3) { cparams.fused_moe_up_gate = false; }
+     cparams.grouped_expert_routing = params.grouped_expert_routing;
+     cparams.fused_up_gate    = params.fused_up_gate;
+     cparams.fused_mmad       = params.fused_mmad;
