@@ -186,7 +186,17 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
             // MoE: gating + routed experts + shared expert
             // Use ff_n as intermediate size for the dense-lead case too,
             // but for MoE we use n_ff_exp as per-layer expert width.
-            auto moe_out = llm_build_moe_ffn(ctx0, lctx, cur,
+            // Kimi-K3 uses Latent MoE: experts operate in n_expert_latent-dim space
+            ggml_tensor * moe_input = cur;
+            if (use_latent_moe && layer.ffn_routed_down) {
+                moe_input = ggml_mul_mat(ctx0, layer.ffn_routed_down, cur);
+                cb(moe_input, "moe_latent_down", il);
+                if (layer.ffn_routed_norm) {
+                    moe_input = llm_build_norm(ctx0, moe_input, hparams, layer.ffn_routed_norm, nullptr, LLM_NORM_RMS, cb, il);
+                }
+            }
+
+            auto moe_out = llm_build_moe_ffn(ctx0, lctx, moe_input,
                     layer.ffn_gate_inp, nullptr,
                     layer.ffn_up_exps, nullptr,
                     layer.ffn_gate_exps, nullptr,
@@ -200,6 +210,12 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
                     nullptr, nullptr, nullptr, nullptr, nullptr);
             cb(moe_out, "moe_out", il);
 
+            // Project MoE output back to full dimension if latent
+            if (use_latent_moe && layer.ffn_routed_up) {
+                moe_out = ggml_mul_mat(ctx0, layer.ffn_routed_up, moe_out);
+                cb(moe_out, "moe_latent_up", il);
+            }
+
             // Shared expert (full-dim, situ activation)
             auto ffn_shexp = llm_build_ffn(ctx0, lctx, nullptr, cur,
                     layer.ffn_up_shexp,   nullptr, nullptr,
@@ -209,19 +225,7 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
                     LLM_FFN_SITU, LLM_FFN_PAR, cb, il);
             cb(ffn_shexp, "ffn_shexp", il);
 
-            // Latent MoE routed — disabled: ffn_gate/ffn_up/ffn_down not loaded for MoE layers
-            //if (use_latent_moe && layer.ffn_routed_down) {
-            //    auto routed = ggml_mul_mat(ctx0, layer.ffn_routed_down, cur);
-            //    routed = llm_build_norm(ctx0, routed, hparams, layer.ffn_routed_norm, nullptr, LLM_NORM_RMS, cb, il);
-            //    auto g_routed = ggml_mul_mat(ctx0, layer.ffn_gate, routed);
-            //    auto u_routed = ggml_mul_mat(ctx0, layer.ffn_up,   routed);
-            //    routed = ggml_mul_mat(ctx0, layer.ffn_down, kimi_k3_situ(ctx0, g_routed, u_routed, situ_beta, situ_linear_beta));
-            //    routed = ggml_mul_mat(ctx0, layer.ffn_routed_up, routed);
-            //    cb(routed, "latent_moe", il);
-            //    cur = ggml_add(ctx0, ggml_add(ctx0, moe_out, ffn_shexp), routed);
-            //} else {
-                cur = ggml_add(ctx0, moe_out, ffn_shexp);
-            //}
+            cur = ggml_add(ctx0, moe_out, ffn_shexp);
             ggml_build_forward_expand(gf, cur);
         }
 
