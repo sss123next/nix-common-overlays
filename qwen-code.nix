@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.27.0-unstable-2026-11-08";
+      version = "0.27.1-unstable-2026-11-10";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-11-08, "fix(web-shell): close managed host integration gaps left by the host mount entry (#16200)"
-        rev = "1888aaf49d52638d84b6feaebebd5b19a62c3126";
-        sha256 = "f1a4d309734835dd68906df37d85ba50068267fa47ac7a29e0998233ce65600d";
+        # main @ 2026-11-10, "feat(managed-agent): add Tool v4 execution measurements (#16498)"
+        rev = "ddab42d67859f94141a7700bd7b50e14436ed0cf";
+        sha256 = "69f3a1180dc65780cf9ef28f2faacbe2caf52f2531964f7be3a1971a10478444";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -40,8 +40,12 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-Zq9uFXaDxajcHz/E0KH0lmmxgnGilVQgA/WtAYi+XlA=";
+        hash = "sha256-LRioAX8sPpGa3brIgvuHYTTQisZ9jTjz/wswMZleAvY=";
       };
+
+      patches = [
+        ./patches/web-templates+budget+0.0.0.patch
+      ];
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
       # the desktop-relay process identity probe). /bin/ps does not exist on NixOS, so the ACP
