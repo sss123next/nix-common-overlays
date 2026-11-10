@@ -97,7 +97,7 @@ self: super: {
         repo = "opencode";
         rev = "7524e5f4955267efa9882e2dd0f485c363ae49e4";
 #        ref = "production";
-        hash = lib.fakeHash;
+        hash = "sha256-jQOyDRvVQQi9A05oFm5ERrKNEh16f01uke2UZDjVaHk=";
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
