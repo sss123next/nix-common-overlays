@@ -186,17 +186,10 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
             // MoE: gating + routed experts + shared expert
             // Use ff_n as intermediate size for the dense-lead case too,
             // but for MoE we use n_ff_exp as per-layer expert width.
-            // Kimi-K3 uses Latent MoE: experts operate in n_expert_latent-dim space
-            ggml_tensor * moe_input = cur;
-            if (use_latent_moe && layer.ffn_routed_down) {
-                moe_input = ggml_mul_mat(ctx0, layer.ffn_routed_down, cur);
-                cb(moe_input, "moe_latent_down", il);
-                if (layer.ffn_routed_norm) {
-                    moe_input = llm_build_norm(ctx0, moe_input, hparams, layer.ffn_routed_norm, nullptr, LLM_NORM_RMS, cb, il);
-                }
-            }
-
-            auto moe_out = llm_build_moe_ffn(ctx0, lctx, moe_input,
+            // Kimi-K3 uses Latent MoE: experts operate in n_expert_latent-dim space.
+            // Down-projection from n_embd→n_expert_latent happens inside
+            // llm_build_moe_ffn (after router, before expert weights) via lctx.model.layers[il].ffn_routed_down.
+            auto moe_out = llm_build_moe_ffn(ctx0, lctx, cur,
                     layer.ffn_gate_inp, nullptr,
                     layer.ffn_up_exps, nullptr,
                     layer.ffn_gate_exps, nullptr,

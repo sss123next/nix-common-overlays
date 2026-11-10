@@ -186,3 +186,22 @@
 +        fflush(stderr);
 +    }
      GGML_ASSERT(as->ne[0] == b->ne[0]); // can_mul_mat
+
+--- a/src/llama-build-context.cpp
++++ b/src/llama-build-context.cpp
+@@ -1872,6 +1872,15 @@
+         }
+     }
+ 
++    // Kimi-K3 latent MoE: project to expert latent dimension after router
++    if (lctx.model.arch == LLM_ARCH_KIMI_K3 && lctx.model.layers[il].ffn_routed_down) {
++        cur = ggml_mul_mat(ctx, lctx.model.layers[il].ffn_routed_down, cur);
++        if (lctx.model.layers[il].ffn_routed_norm) {
++            cur = llm_build_norm(ctx, cur, lctx.model.hparams, lctx.model.layers[il].ffn_routed_norm, nullptr, LLM_NORM_RMS, cb, il);
++        }
++        n_embd = cur->ne[0]; // update to n_expert_latent (3584)
++    }
++
+     cur = ggml_reshape_3d(ctx, cur, n_embd, 1, n_tokens);
+ 
+     if (weight_before_ffn) {
