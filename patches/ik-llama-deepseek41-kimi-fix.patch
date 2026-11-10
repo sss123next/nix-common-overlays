@@ -1,5 +1,5 @@
---- a/src/llama-arch.h
-+++ b/src/llama-arch.h
+--- a/src/llama-arch.h	2026-11-10 14:46:44.846183583 +0300
++++ b/src/llama-arch.h	2026-11-10 14:46:44.869685623 +0300
 @@ -487,6 +487,8 @@
      LLM_TENSOR_ENGRAM_K,
      LLM_TENSOR_ENGRAM_Q,
@@ -9,8 +9,8 @@
      LLM_TENSOR_HC_HEAD_BASE,
      LLM_TENSOR_HC_HEAD_FN,
      LLM_TENSOR_HC_HEAD_SCALE,
---- a/src/llama-model.h
-+++ b/src/llama-model.h
+--- a/src/llama-model.h	2026-11-10 14:46:44.849593179 +0300
++++ b/src/llama-model.h	2026-11-10 14:46:44.873577754 +0300
 @@ -463,6 +463,8 @@
      struct ggml_tensor * engram_k    = nullptr;
      struct ggml_tensor * engram_q    = nullptr;
@@ -20,8 +20,8 @@
  
      // long rope factors
      struct ggml_tensor * rope_long  = nullptr;
---- a/src/llama-model.cpp
-+++ b/src/llama-model.cpp
+--- a/src/llama-model.cpp	2026-11-10 14:46:44.852994883 +0300
++++ b/src/llama-model.cpp	2026-11-10 14:46:44.877490768 +0300
 @@ -1117,6 +1117,8 @@
              { LLM_TENSOR_FFN_PRE_NORM_2,       "blk.%d.pre_ffw_norm_2" },
              { LLM_TENSOR_LAYER_OUT_SCALE,      "blk.%d.layer_output_scale" },
@@ -31,8 +31,8 @@
              { LLM_TENSOR_PER_LAYER_PROJ,       "blk.%d.proj" },
              { LLM_TENSOR_PER_LAYER_POST_NORM,  "blk.%d.post_norm" },
          },
---- a/src/llama-load-tensors.cpp
-+++ b/src/llama-load-tensors.cpp
+--- a/src/llama-load-tensors.cpp	2026-11-10 14:46:44.856525235 +0300
++++ b/src/llama-load-tensors.cpp	2026-11-10 14:50:50.610613907 +0300
 @@ -3764,6 +3764,18 @@
      model.hc_head_base  = create_tensor_from_meta(ctx_output, pick_tensor_name({"hc_head_base.weight", "output_hc_base.weight"}), hc_head_flags);
      model.hc_head_fn    = create_tensor_from_meta(ctx_output, pick_tensor_name({"hc_head_fn.weight", "output_hc_fn.weight"}), hc_head_flags);
@@ -60,79 +60,81 @@
          }
  
      }
---- a/src/llama-hparams.cpp
-+++ b/src/llama-hparams.cpp
-@@ -945,6 +945,11 @@
-                         }
-                         ml.get_key(LLM_KV_PLE_NGRAM_SIZE,      hparams.ple_ngram_size);
-                         ml.get_key(LLM_KV_PLE_HEADS_PER_NGRAM, hparams.ple_heads_per_ngram);
-+                        ml.get_key(LLM_KV_EMBEDDING_LENGTH_PER_LAYER, hparams.n_embd_per_layer, false);
-+                        if (hparams.n_embd_per_layer == 0) {
-+                            hparams.n_embd_per_layer = hparams.n_embd;
-+                        }
-+                        hparams.engram_key_length = hparams.n_embd_per_layer;
-                         ml.get_key(LLM_KV_PLE_CONV_KERNEL,     hparams.ple_conv_kernel);
-                         ml.get_key(LLM_KV_EMBEDDING_LENGTH_PER_LAYER, hparams.ple_head_dim);
-                         ml.get_key(LLM_KV_PLE_EOS_TOKEN_ID,    hparams.ple_eos_token_id, false);
-@@ -2519,19 +2524,24 @@
+--- a/src/llama-hparams.cpp	2026-11-10 14:46:44.860609012 +0300
++++ b/src/llama-hparams.cpp	2026-11-10 14:46:44.885991675 +0300
+@@ -2519,19 +2519,32 @@
                      ml.get_key(LLM_KV_HASH_LAYER_COUNT, hparams.dsv4_hash_layer_count, false);
  
                      if (model.arch == LLM_ARCH_DEEPSEEK41) {
 -                        ml.get_arr_n(LLM_KV_ENGRAM_LAYER_IDS, hparams.engram_n_layer);
-+                        ml.get_arr_n(LLM_KV_PLE_LAYERS, hparams.engram_n_layer);
++                        bool use_ple = ml.get_arr_n(LLM_KV_PLE_LAYERS, hparams.engram_n_layer, false);
++                        if (!use_ple) {
++                            ml.get_arr_n(LLM_KV_ENGRAM_LAYER_IDS, hparams.engram_n_layer);
++                        }
                          if (hparams.engram_n_layer == 0 || hparams.engram_n_layer > LLAMA_MAX_LAYERS) {
                              throw std::runtime_error(format("DeepSeek-V4.1 engram layer count %u is out of range", hparams.engram_n_layer));
                          }
                          {
                              std::vector<uint32_t> ids;
 -                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_LAYER_IDS), ids);
-+                            ml.get_arr(ml.llm_kv(LLM_KV_PLE_LAYERS), ids);
++                            ml.get_arr(use_ple ? ml.llm_kv(LLM_KV_PLE_LAYERS) : ml.llm_kv(LLM_KV_ENGRAM_LAYER_IDS), ids);
                              std::copy_n(ids.begin(), std::min<size_t>(ids.size(), LLAMA_MAX_LAYERS), hparams.engram_layer_ids.begin());
                          }
 -                        ml.get_key(LLM_KV_ENGRAM_HEAD_COUNT,     hparams.engram_n_head);
 -                        ml.get_key(LLM_KV_ENGRAM_KEY_LENGTH,     hparams.engram_key_length);
 -                        ml.get_key(LLM_KV_ENGRAM_MAX_NGRAM_SIZE, hparams.engram_max_ngram_size);
 -                        ml.get_key(LLM_KV_ENGRAM_PAD_ID,         model.engram_pad_id);
-+                        ml.get_key(LLM_KV_PLE_HEADS_PER_NGRAM,     hparams.engram_n_head);
-+                        ml.get_key(LLM_KV_EMBEDDING_LENGTH_PER_LAYER, hparams.n_embd_per_layer, false);
-+                        if (hparams.n_embd_per_layer == 0) {
-+                            hparams.n_embd_per_layer = hparams.n_embd;
++                        if (use_ple) {
++                            ml.get_key(LLM_KV_PLE_HEADS_PER_NGRAM, hparams.engram_n_head);
++                            ml.get_key(LLM_KV_EMBEDDING_LENGTH_PER_LAYER, hparams.n_embd_per_layer, false);
++                            if (hparams.n_embd_per_layer == 0) {
++                                hparams.n_embd_per_layer = hparams.n_embd;
++                            }
++                            hparams.engram_key_length = hparams.n_embd_per_layer;
++                            ml.get_key(LLM_KV_PLE_NGRAM_SIZE, hparams.engram_max_ngram_size);
++                        } else {
++                            ml.get_key(LLM_KV_ENGRAM_HEAD_COUNT,     hparams.engram_n_head);
++                            ml.get_key(LLM_KV_ENGRAM_KEY_LENGTH,     hparams.engram_key_length);
++                            ml.get_key(LLM_KV_ENGRAM_MAX_NGRAM_SIZE, hparams.engram_max_ngram_size);
 +                        }
-+                        hparams.engram_key_length = hparams.n_embd_per_layer;
-+                        ml.get_key(LLM_KV_EMBEDDING_LENGTH_PER_LAYER,     hparams.engram_key_length);
-+                        ml.get_key(LLM_KV_PLE_NGRAM_SIZE, hparams.engram_max_ngram_size);
 +                        ml.get_key(LLM_KV_ENGRAM_PAD_ID,         model.engram_pad_id, false);
                          if (hparams.engram_n_head == 0 || hparams.engram_max_ngram_size < 2) {
                              throw std::runtime_error("DeepSeek-V4.1 engram needs at least one head and a 2-gram");
                          }
-@@ -2540,9 +2550,9 @@
+@@ -2540,9 +2553,15 @@
                                  throw std::runtime_error(format("engram layer %u is out of range", hparams.engram_layer_ids[e]));
                              }
                          }
 -                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_MULTIPLIERS), model.engram_multipliers);
 -                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_PRIMES),      model.engram_primes);
 -                        ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_OFFSETS),     model.engram_offsets);
-+                        ml.get_arr(ml.llm_kv(LLM_KV_PLE_LAYER_MULTIPLIERS), model.engram_multipliers);
-+                        ml.get_arr(ml.llm_kv(LLM_KV_PLE_HEAD_OFFSETS),      model.engram_primes);
-+                        ml.get_arr(ml.llm_kv(LLM_KV_PLE_HEAD_VOCAB_SIZES),     model.engram_offsets);
++                        if (use_ple) {
++                            ml.get_arr(ml.llm_kv(LLM_KV_PLE_LAYER_MULTIPLIERS), model.engram_multipliers);
++                            ml.get_arr(ml.llm_kv(LLM_KV_PLE_HEAD_OFFSETS),      model.engram_primes);
++                            ml.get_arr(ml.llm_kv(LLM_KV_PLE_HEAD_VOCAB_SIZES),  model.engram_offsets);
++                        } else {
++                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_MULTIPLIERS), model.engram_multipliers);
++                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_PRIMES),      model.engram_primes);
++                            ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_OFFSETS),     model.engram_offsets);
++                        }
                          ml.get_arr(ml.llm_kv(LLM_KV_ENGRAM_TOKEN_MAP),   model.engram_token_map);
                          const size_t n_bucket = (size_t) (hparams.engram_max_ngram_size - 1) * hparams.engram_n_head;
                          if (model.engram_multipliers.size() != (size_t) hparams.engram_n_layer * hparams.engram_max_ngram_size) {
-@@ -2552,9 +2562,11 @@
+@@ -2552,8 +2571,10 @@
                              model.engram_offsets.size() != model.engram_primes.size()) {
                              throw std::runtime_error("engram prime or offset count does not match layers * buckets");
                          }
 -                        for (uint64_t p : model.engram_primes) {
+-                            if (p == 0) throw std::runtime_error("engram prime of zero would divide by zero in the hash");
 +                        if (model.arch != LLM_ARCH_DEEPSEEK41) {
 +                            for (uint64_t p : model.engram_primes) {
-                             if (p == 0) throw std::runtime_error("engram prime of zero would divide by zero in the hash");
++                                if (p == 0) throw std::runtime_error("engram prime of zero would divide by zero in the hash");
++                            }
                          }
-+                        }
                      }
  
-                     uint32_t n_compress_ratios = 0;
---- a/src/llama.cpp
-+++ b/src/llama.cpp
+--- a/src/llama.cpp	2026-11-10 14:46:44.864727150 +0300
++++ b/src/llama.cpp	2026-11-10 14:46:44.889882130 +0300
 @@ -4455,6 +4455,10 @@
                  continue;
              }
