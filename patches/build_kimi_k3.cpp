@@ -114,8 +114,11 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
             cb(q_b, "q", il);
 
             // KV down-projection (nope-only: all kv_lora_rank used as key)
+            // wkv_a_mqa is [n_embd, kv_lora_rank + n_rot]; output has n_rot extra dims
+            // even in nope-only mode. Split into latent and rope parts and norm only the latent.
             auto kv_a = ggml_mul_mat(ctx0, layer.wkv_a_mqa, cur);
-            auto kv_a_norm = llm_build_norm(ctx0, kv_a, hparams, layer.attn_kv_a_norm, nullptr, LLM_NORM_RMS, cb, il);
+            auto kv_a_latent = ggml_view_2d(ctx0, kv_a, hparams.n_lora_kv, n_tokens, kv_a->nb[0], 0);
+            auto kv_a_norm = llm_build_norm(ctx0, kv_a_latent, hparams, layer.attn_kv_a_norm, nullptr, LLM_NORM_RMS, cb, il);
             // K_B: [n_embd_head_qk_nope, kv_lora_rank, n_head]
             auto k_b = ggml_mul_mat(ctx0, layer.wk_b, ggml_cont(ctx0, ggml_transpose(ctx0, kv_a_norm)));
             k_b = ggml_cont(ctx0, ggml_transpose(ctx0, k_b));
