@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.27.1-unstable-2026-11-10";
+      version = "0.27.1-unstable-2026-11-11";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-11-10, "feat(managed-agent): add Tool v4 execution measurements (#16498)"
-        rev = "ddab42d67859f94141a7700bd7b50e14436ed0cf";
-        sha256 = "69f3a1180dc65780cf9ef28f2faacbe2caf52f2531964f7be3a1971a10478444";
+        # main @ 2026-11-11, "test(cli): deflake the hosted harness message-stop test (#16853) (#16855)"
+        rev = "1ab1d169b721706f6096cca1d1c18da78fa61b56";
+        sha256 = "83803a20877e3b02131bdf02eee721f1e599c203e64caf28780f1de099bb0022";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -19,7 +19,7 @@ self: super: {
       pnpm = pnpm_11;
 
       nativeBuildInputs = [
-        nodejs
+        nodejs_26
         pnpm
         pnpmConfigHook
       ];
@@ -40,12 +40,12 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-LRioAX8sPpGa3brIgvuHYTTQisZ9jTjz/wswMZleAvY=";
+        hash = "sha256-G8Kh4/jWu6al/hbLGCAQ+bMXFyCCl1+iB6d5t8yVtrY=";
       };
 
-      patches = [
-        ./patches/web-templates+budget+0.0.0.patch
-      ];
+      # Upstream now sets MAX_DOCUMENT_RUNTIME_BYTES = 2_132_000 (>= our 2_100_000 patch);
+      # the web-templates+budget patch is no longer needed.
+      patches = [ ];
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
       # the desktop-relay process identity probe). /bin/ps does not exist on NixOS, so the ACP
