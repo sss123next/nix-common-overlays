@@ -92,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.2.5";
+      version = "2.2.7";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -100,9 +100,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "e311199f4ae2369bfded881facbfa40f3f49f061";
+        rev = "e56eff2bc01649b3aa21224876b8874e77dea4b0";
 #        ref = "production";
-        hash = "sha256-09ivzoFkwVcyG8TeVasCurjg9Yb4ZQVT5LD6tqaM6lU=";
+        hash = "sha256-08c80yizq4780lvjjhf86n38qfp17cvgw00852hfr01ngc5klh8v=";
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
@@ -151,7 +151,7 @@ self: super: {
 
       nativeBuildInputs = [
         bun
-        nodejs
+        nodejs_26
         installShellFiles
         makeBinaryWrapper
         writableTmpDirAsHomeHook
