@@ -194,7 +194,7 @@ diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
 index aec45a80..4881fb19 100644
 --- a/src/llama-model-loader.cpp
 +++ b/src/llama-model-loader.cpp
-@@ -1074,6 +1074,11 @@ struct ggml_tensor * llama_model_loader::create_tensor_for(struct ggml_context *
+@@ -1075,6 +1075,11 @@
      struct ggml_tensor * tensor = ggml_dup_tensor(ctx, cur);
      ggml_set_name(tensor, ggml_get_name(cur));
  
@@ -206,7 +206,8 @@ index aec45a80..4881fb19 100644
      if (duplicated) {
          size_data += ggml_nbytes(cur);
      } else {
-@@ -1189,10 +1189,33 @@
+@@ -1478,14 +1483,37 @@
+ }
  
  // for backwards compatibility, does not support ggml-backend
 +static inline float f8_e4m3_to_f32(uint8_t bits) {
@@ -224,7 +225,9 @@ index aec45a80..4881fb19 100644
      const auto & w = require_weight(ggml_get_name(cur));
 +    const bool is_f8 = (w.tensor->type == GGML_TYPE_F8_E4M3);
  
-     if (use_mmap) {
+     if (!w.nvfp4_scale.empty() || w.mxfp4_repack) {
+         read_nvfp4_rows(w, *files.at(w.idx), cur, (uint8_t *) cur->data, 0, ggml_nrows(cur));
+     } else if (use_mmap) {
          const auto & mapping = mappings.at(w.idx);
 -        if (cur->data == nullptr) {
 +        if (is_f8) {
@@ -242,8 +245,7 @@ index aec45a80..4881fb19 100644
              cur->data = (uint8_t *)mapping->addr() + w.offs;
          } else {
              memcpy(cur->data, (uint8_t *)mapping->addr() + w.offs, ggml_nbytes(cur));
-@@ -1200,7 +1223,20 @@
-     } else {
+@@ -1494,8 +1522,21 @@
          GGML_ASSERT(cur->data != nullptr);
          GGML_ASSERT(w.idx < files.size());
          const auto & file = files.at(w.idx);
@@ -261,9 +263,6 @@ index aec45a80..4881fb19 100644
 +                dst[i] = f8_e4m3_to_f32(src[i]);
 +            }
 +        } else {
-+            file->seek(w.offs, SEEK_SET);
-+            file->read_raw(cur->data, ggml_nbytes(cur));
-+        }
 +            file->seek(w.offs, SEEK_SET);
 +            file->read_raw(cur->data, ggml_nbytes(cur));
 +        }
