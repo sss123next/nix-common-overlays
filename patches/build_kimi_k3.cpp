@@ -56,8 +56,6 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
     if (hparams.n_head() == 0 || this->n_tokens == 0) {
         return new_graph_custom();
     }
-    LLAMA_LOG_WARN("build_kimi_k3: start n_head=%ld n_tokens=%ld n_ff=%ld n_embd_head_v_mla=%ld n_embd_head_k_mla=%ld\n",
-        hparams.n_head(), this->n_tokens, hparams.n_ff(0), hparams.n_embd_head_v_mla(), hparams.n_embd_head_k_mla());
     ggml_cgraph * gf = new_graph_custom();
 
     const int64_t n_tokens            = this->n_tokens;
@@ -95,7 +93,6 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
     ggml_tensor * prefix_sum = inpL;
 
     for (int il = 0; il < (int) hparams.n_layer; ++il) {
-        LLAMA_LOG_WARN("build_kimi_k3: layer %d recurrent=%d\n", il, (int)hparams.is_recurrent(il));
         const auto & layer = model.layers[il];
 
         // ---- attention block ----
@@ -169,13 +166,10 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
 
         // Cross-layer attention residual
         if (use_attn_res) {
-            fprintf(stderr, "attn_res_score null=%d use_attn_res=%d\n", layer.attn_res_score == nullptr, (int)use_attn_res);
             cur = kimi_k3_res_mix(ctx0, cur, layer.attn_res_score, cb, il);
         }
 
-        LLAMA_LOG_WARN("before add: pfx ne0=%zu ne1=%zu cur ne0=%zu ne1=%zu\n", prefix_sum->ne[0], prefix_sum->ne[1], cur->ne[0], cur->ne[1]);
         prefix_sum = ggml_add(ctx0, prefix_sum, cur);
-        fprintf(stderr, "after add: prefix_sum ne0=%zu ne1=%zu\n", prefix_sum->ne[0], prefix_sum->ne[1]);
         prefix_sum = lctx.cvec.apply_to(ctx0, prefix_sum, il);
         cb(prefix_sum, "prefix_sum_attn", il);
 
@@ -185,7 +179,6 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
 
         if ((uint32_t) il < hparams.n_layer_dense_lead) {
             // Dense FFN with situ activation
-            LLAMA_LOG_WARN("ffn: cur ne0=%zu ne1=%zu ffn_gate null=%d\n", cur->ne[0], cur->ne[1], layer.ffn_gate == nullptr);
             auto g = ggml_mul_mat(ctx0, layer.ffn_gate, cur);
             auto u = ggml_mul_mat(ctx0, layer.ffn_up,   cur);
             cur = ggml_mul_mat(ctx0, layer.ffn_down, kimi_k3_situ(ctx0, g, u, situ_beta, situ_linear_beta));
@@ -236,7 +229,6 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
         }
 
         prefix_sum = ggml_add(ctx0, prefix_sum, cur);
-        fprintf(stderr, "after add: prefix_sum ne0=%zu ne1=%zu\n", prefix_sum->ne[0], prefix_sum->ne[1]);
         prefix_sum = lctx.cvec.apply_to(ctx0, prefix_sum, il);
         cb(prefix_sum, "l_out", il);
 
