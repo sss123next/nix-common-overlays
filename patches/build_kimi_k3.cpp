@@ -143,7 +143,7 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
             auto KQ = ggml_mul_mat(ctx0, k_b, q_nope);
             auto KQ_scaled = ggml_scale(ctx0, KQ, 1.0f / sqrtf((float) n_embd_head_k_mla));
             auto KQ_masked = ggml_diag_mask_inf(ctx0, KQ_scaled, 0);
-            auto KQ_soft = ggml_soft_max_ext(ctx0, KQ_masked, KQ_mask, 1.0f, 1.0f);
+            auto KQ_soft = ggml_soft_max(ctx0, KQ_masked);
             cb(KQ_soft, "attn_soft", il);
 
             // ---- V attention: softmax @ V ----
