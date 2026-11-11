@@ -36,6 +36,7 @@ self: super: {
           ./patches/ik-llama-json-schema-pattern.patch
           ./patches/ik-llama-f8-e4m3.patch
           ./patches/ik-llama-kimi-k3.patch
+          ./patches/ik-llama-kimi-k3-requires-all.patch
           ./patches/ik-llama-deepseek41-kimi-fix.patch
         ];
 
