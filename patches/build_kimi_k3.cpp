@@ -76,7 +76,12 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
 
     delta_net delta(lctx, batch);
 
-    auto * inp_out_ids = (n_outputs != n_tokens) ? build_inp_out_ids() : nullptr;
+    // llama_output_reserve() sets lctx.n_outputs = 0 before graph building,
+    // which makes the build context's n_outputs = 0 for worst_case=false.
+    // With n_outputs=0, build_inp_out_ids() creates a zero-sized tensor, and
+    // ggml_get_rows inside KDA selects 0 rows → ne[1]=0.  Fall back to
+    // n_tokens when n_outputs is 0 (all tokens need output at init/prompt).
+    auto * inp_out_ids = (n_outputs > 0 && n_outputs != n_tokens) ? build_inp_out_ids() : nullptr;
     // No KQ_mask needed: we use ggml_diag_mask_inf + ggml_soft_max (without mask)
     // for causal masking.  Calling build_inp_KQ_mask() would create a tensor
     // that llama_decode then tries to update as host memory, but with RPC backend
