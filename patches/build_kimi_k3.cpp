@@ -126,44 +126,39 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
             auto wk_b_T_2d = ggml_reshape_2d(ctx0, wk_b_T, hparams.n_lora_kv, n_head * n_embd_head_qk_nope);
             auto k_b_2d = ggml_mul_mat(ctx0, wk_b_T_2d, kv_a_norm);
             auto k_b = ggml_reshape_3d(ctx0, k_b_2d, n_embd_head_qk_nope, n_tokens, n_head);
-            // V_B: [kv_lora_rank, n_embd_head_v, n_head] — ne[0]=kv_lora_rank, no transpose needed
-            auto wv_b_2d = ggml_reshape_2d(ctx0, layer.wv_b, hparams.n_lora_kv, n_head * n_embd_head_v);
+            // V_B: [kv_lora_rank, n_embd_head_v_mla, n_head] — ne[0]=kv_lora_rank, no transpose needed
+            auto wv_b_2d = ggml_reshape_2d(ctx0, layer.wv_b, hparams.n_lora_kv, n_head * n_embd_head_v_mla);
             auto v_2d = ggml_mul_mat(ctx0, wv_b_2d, kv_a_norm);
-            auto v = ggml_reshape_3d(ctx0, v_2d, n_embd_head_v, n_tokens, n_head);
+            auto v = ggml_reshape_3d(ctx0, v_2d, n_embd_head_v_mla, n_tokens, n_head);
 
-            // Build K and V tensors (already per-head from mul_mat)
-            auto Kcur = ggml_reshape_4d(ctx0, k_b, n_embd_head_qk_nope, 1, n_head, n_tokens);
-            auto Vcur = ggml_reshape_4d(ctx0, v, n_embd_head_v, 1, n_head, n_tokens);
-
-            // Transpose Q to [n_embd_head_k_mla, n_head, n_tokens] for score computation
-            ggml_tensor * q = ggml_reshape_4d(ctx0, q_b, n_embd_head_k_mla, 1, n_head, n_tokens);
-            // K has n_embd_head_qk_nope dims per head (nope-only), Q has full n_embd_head_k_mla.
-            // Slice Q to match K: only first n_embd_head_qk_nope elements per head.
-            auto q_2d = ggml_reshape_2d(ctx0, q, n_embd_head_k_mla, n_head * n_tokens);
-            auto q_nope = ggml_view_2d(ctx0, q_2d, n_embd_head_qk_nope, n_head * n_tokens, q_2d->nb[0], 0);
-            auto KQ = ggml_mul_mat(ctx0,
-                    ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, Kcur, n_embd_head_qk_nope, n_head * n_tokens))),
-                    q_nope);
-            KQ = ggml_reshape_4d(ctx0, KQ, 1, n_tokens, n_head, n_tokens);
-
-            // Attention softmax
+            // ---- score: K^T @ Q per head ----
+            // Q: [n_embd_head_k_mla, n_head, n_tokens] → permute to [d, n_tokens, n_head]
+            auto q_3d = ggml_reshape_3d(ctx0, q_b, n_embd_head_k_mla, n_head, n_tokens);
+            auto q_perm = ggml_permute(ctx0, q_3d, 0, 2, 1, 3);
+            // Slice Q to nope dims (first n_embd_head_qk_nope)
+            auto q_nope = ggml_view_3d(ctx0, q_perm, n_embd_head_qk_nope, n_tokens, n_head,
+                q_perm->nb[1], q_perm->nb[2], 0);
+            // K is [n_embd_head_qk_nope, n_tokens, n_head] — same layout as permuted Q
+            // K^T @ Q per head → [n_tokens, n_tokens, n_head]
+            auto KQ = ggml_mul_mat(ctx0, k_b, q_nope);
             auto KQ_scaled = ggml_scale(ctx0, KQ, 1.0f / sqrtf((float) n_embd_head_k_mla));
             auto KQ_masked = ggml_diag_mask_inf(ctx0, KQ_scaled, 0);
             auto KQ_soft = ggml_soft_max_ext(ctx0, KQ_masked, KQ_mask, 1.0f, 1.0f);
             cb(KQ_soft, "attn_soft", il);
 
-            // V attention
-            auto V_attn = ggml_mul_mat(ctx0,
-                    ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, Vcur, n_embd_head_v, n_head * n_tokens))),
-                    ggml_reshape_2d(ctx0, KQ_soft, n_tokens, n_head * n_tokens));
-            auto o = ggml_reshape_4d(ctx0, V_attn, n_embd_head_v, 1, n_head, n_tokens);
+            // ---- V attention: softmax @ V ----
+            // V: [d_v, n_tokens, n_head] → transpose to [n_tokens, d_v, n_head]
+            auto V_T_2d = ggml_cont(ctx0, ggml_transpose(ctx0,
+                ggml_reshape_2d(ctx0, v, n_embd_head_v_mla, n_head * n_tokens)));
+            auto V_T_3d = ggml_reshape_3d(ctx0, V_T_2d, n_tokens, n_embd_head_v_mla, n_head);
+            auto kqv = ggml_mul_mat(ctx0, V_T_3d, KQ_soft);
 
-            // Output projection
-            o = ggml_cont(ctx0, ggml_transpose(ctx0, ggml_reshape_2d(ctx0, o, n_head * n_embd_head_v, n_tokens)));
-            // MLA output gate (sigmoid)
+            // ---- output projection ----
+            // Reshape to [d_v * n_head, n_tokens], apply gate, then wo
+            auto o_2d = ggml_reshape_2d(ctx0, kqv, n_embd_head_v_mla * n_head, n_tokens);
             auto attn_gate = ggml_sigmoid(ctx0, ggml_mul_mat(ctx0, layer.attn_gate, cur));
-            o = ggml_mul(ctx0, attn_gate, o);
-            cur = ggml_mul_mat(ctx0, layer.wo, o);
+            auto gated = ggml_mul(ctx0, attn_gate, o_2d);
+            cur = ggml_mul_mat(ctx0, layer.wo, gated);
             cb(cur, "attn_out", il);
         }
 
