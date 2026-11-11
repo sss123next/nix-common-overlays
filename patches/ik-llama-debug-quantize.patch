@@ -1,0 +1,16 @@
+diff --git a/src/llama-quantize.cpp b/src/llama-quantize.cpp
+index 9460869c..845bfcfe 100644
+--- a/src/llama-quantize.cpp
++++ b/src/llama-quantize.cpp
+@@ -1960,6 +1960,11 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
+             }
+             tensor->data = read_data.data();
+         }
++        if (tensor->data == nullptr) {
++            LLAMA_LOG_ERROR("%s: tensor '%s' type=%s ne=[%ld,%ld,%ld,%ld] data=nullptr BEFORE load_data_for\n", __func__,
++                    ggml_get_name(tensor), ggml_type_name(tensor->type),
++                    tensor->ne[0], tensor->ne[1], tensor->ne[2], tensor->ne[3]);
++        }
+         ml.load_data_for(tensor);
+ 
+         LLAMA_LOG_INFO("[%4d/%4d] %36s - [%s], type = %6s, ",
