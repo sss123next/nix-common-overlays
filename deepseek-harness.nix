@@ -21,7 +21,8 @@ self: super: {
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "deepseek-harness";
       # Release candidate tags exist; pinned to the most recent one.
-      version = "0.2.2-rc.1-unstable-2026-11-07";
+      # Node 26 migration: nixpkgs default was nodejs_22 (below engine floor >=24.9.0).
+      version = "0.2.2-rc.1-unstable-2026-11-11";
 
       src = fetchFromGitHub {
         owner = "deepseek-ai";
@@ -30,12 +31,14 @@ self: super: {
         hash = "sha256-pzSBQbLwcT/wnCg4ugWq7YmRngCaFOiKVCjekI5aKa0=";
       };
 
-      # packageManager: pnpm@11.28.5 (nixpkgs pnpm_11 lags a bit; tolerated);
+      # packageManager: pnpm@11.28.5 (nixpkgs pnpm_11 lags a bit; tolerated).
+      # Ship on nodejs_26 (engines >= 24.9.0) — nixpkgs' default nodejs is
+      # nodejs_22 which is below the floor.
       # pnpm >= 11 needs fetcher version 4.
       pnpm = pnpm_11;
 
       nativeBuildInputs = [
-        nodejs
+        nodejs_26
         pnpm
         pnpmConfigHook
         makeShellWrapper
@@ -120,7 +123,7 @@ self: super: {
 
         # Launcher using nixpkgs' node with --expose-internals.
         mkdir -p $out/bin
-        makeWrapper ${lib.getExe nodejs} $out/bin/dsh \
+        makeWrapper ${lib.getExe nodejs_26} $out/bin/dsh \
           --add-flags "--expose-internals" \
           --add-flags "$out/libexec/dsh/apps/cli/lib/bin.js"
 

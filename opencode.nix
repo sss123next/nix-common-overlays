@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-mrVdNQkZU7mUZxgaRoyHhSdk2KXwmSPt81qB3BNlI7g=";
+            "x86_64-linux"   = "sha256-qA++iMCcW7Pt+sV2afp7i33ybiIdbFGeDm/m/u2jkIM=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -102,7 +102,7 @@ self: super: {
         repo = "opencode";
         rev = "e56eff2bc01649b3aa21224876b8874e77dea4b0";
 #        ref = "production";
-        hash = "sha256-08c80yizq4780lvjjhf86n38qfp17cvgw00852hfr01ngc5klh8v=";
+        hash = "sha256-G0E6C3s2gOygKAgA/jY74TqMhjXIQSk3BegQ/KMHiCE=";
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
@@ -215,7 +215,7 @@ self: super: {
 
         # config.json / tui.json are already in place from buildPhase.
         install -Dm644 ${models-dev.jsonschema} $out/share/model-schema.json
-        install -Dm644 ../web/public/theme.json $out/share/theme.json
+        install -Dm644 ../../services/site/public/v1/docs/theme.json $out/share/theme.json
 
         runHook postInstall
       '';
