@@ -77,10 +77,10 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
     delta_net delta(lctx, batch);
 
     auto * inp_out_ids = (n_outputs != n_tokens) ? build_inp_out_ids() : nullptr;
-    LLAMA_LOG_WARN("build_kimi_k3: before KQ_mask\n");
-    auto * KQ_mask = build_inp_KQ_mask();
-    LLAMA_LOG_WARN("build_kimi_k3: after KQ_mask, before embd\n");
-
+    // No KQ_mask needed: we use ggml_diag_mask_inf + ggml_soft_max (without mask)
+    // for causal masking.  Calling build_inp_KQ_mask() would create a tensor
+    // that llama_decode then tries to update as host memory, but with RPC backend
+    // the buffer is not host-accessible.
     lctx.inp_s_seq_qnext = ggml_new_tensor_2d(ctx0, GGML_TYPE_I32, 1, n_tokens);
     cb(lctx.inp_s_seq_qnext, "inp_s_seq_qnext", -1);
     ggml_set_input(lctx.inp_s_seq_qnext);
