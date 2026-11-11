@@ -120,13 +120,18 @@ ggml_cgraph * llm_build_context::build_kimi_k3() {
             auto kv_a_latent = ggml_view_2d(ctx0, kv_a, hparams.n_lora_kv, n_tokens, kv_a->nb[0], 0);
             auto kv_a_norm = llm_build_norm(ctx0, kv_a_latent, hparams, layer.attn_kv_a_norm, nullptr, LLM_NORM_RMS, cb, il);
             // K_B: [n_embd_head_qk_nope, kv_lora_rank, n_head]
-            auto k_b = ggml_mul_mat(ctx0, layer.wk_b, ggml_cont(ctx0, ggml_transpose(ctx0, kv_a_norm)));
-            k_b = ggml_cont(ctx0, ggml_transpose(ctx0, k_b));
-            // V_B: [kv_lora_rank, n_embd_head_v, n_head]
-            auto v = ggml_mul_mat(ctx0, layer.wv_b, ggml_cont(ctx0, ggml_transpose(ctx0, kv_a_norm)));
-            v = ggml_cont(ctx0, ggml_transpose(ctx0, v));
+            // Transpose wk_b so ne[0]=kv_lora_rank matches kv_a_norm's first dim,
+            // then mul_mat yields [n_head*n_embd_head_qk_nope, n_tokens].
+            auto wk_b_T = ggml_cont(ctx0, ggml_transpose(ctx0, layer.wk_b));
+            auto wk_b_T_2d = ggml_reshape_2d(ctx0, wk_b_T, hparams.n_lora_kv, n_head * n_embd_head_qk_nope);
+            auto k_b_2d = ggml_mul_mat(ctx0, wk_b_T_2d, kv_a_norm);
+            auto k_b = ggml_reshape_3d(ctx0, k_b_2d, n_embd_head_qk_nope, n_tokens, n_head);
+            // V_B: [kv_lora_rank, n_embd_head_v, n_head] — ne[0]=kv_lora_rank, no transpose needed
+            auto wv_b_2d = ggml_reshape_2d(ctx0, layer.wv_b, hparams.n_lora_kv, n_head * n_embd_head_v);
+            auto v_2d = ggml_mul_mat(ctx0, wv_b_2d, kv_a_norm);
+            auto v = ggml_reshape_3d(ctx0, v_2d, n_embd_head_v, n_tokens, n_head);
 
-            // Build K and V tensors
+            // Build K and V tensors (already per-head from mul_mat)
             auto Kcur = ggml_reshape_4d(ctx0, k_b, n_embd_head_qk_nope, 1, n_head, n_tokens);
             auto Vcur = ggml_reshape_4d(ctx0, v, n_embd_head_v, 1, n_head, n_tokens);
 
