@@ -71,6 +71,20 @@ index 60d0ac9c..2e76c815 100644
 +    if (encoded_exp > 15 || (encoded_exp == 15 && encoded_man > 6)) { return sign | 0x7E; }
 +    return sign | (uint8_t)(encoded_exp << 3) | (uint8_t)encoded_man;
 +}
+diff --git a/ggml/src/ggml-quants.c b/ggml/src/ggml-quants.c
+index c9add9c8..64c2a52b 100644
+--- a/ggml/src/ggml-quants.c
++++ b/ggml/src/ggml-quants.c
+@@ -15988,6 +15988,9 @@ bool ggml_validate_row_data(enum ggml_type type, const void * data, size_t nbyte
+         case GGML_TYPE_TQP5:
+         case GGML_TYPE_TQP6:
+         case GGML_TYPE_TQP7: break;
++        case GGML_TYPE_F8_E4M3:
++            // f8_e4m3: any byte value is valid
++            break;
+             // nothing to validate
+             break;
+         default:
 diff --git a/ggml/src/ggml-quants.h b/ggml/src/ggml-quants.h
 index 613f7638..6d977f82 100644
 --- a/ggml/src/ggml-quants.h
