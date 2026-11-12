@@ -135,28 +135,17 @@
  
 --- a/src/llama.cpp	2026-11-10 14:46:44.864727150 +0300
 +++ b/src/llama.cpp	2026-11-11 00:00:28.163055148 +0300
-@@ -4455,6 +4455,10 @@
+@@ -4460,6 +4460,10 @@
                  continue;
              }
-             if (name == "rope_freqs.weight") {
+         }
 +        if (name == "per_layer_token_embd.weight" || name == "output_res_score.weight") {
 +            output_misc_size += size;
 +            continue;
 +        }
-                 if (gemma4_rope_layer >= 0) {
-                     result[gemma4_rope_layer] += size;
-                 }
-@@ -4465,6 +4469,10 @@
+         if (name == "mtp_pre_proj.weight"  || name == "mtp_post_proj.weight" ||
              name == "mtp_centroids.weight" || name == "mtp_token_ordering.weight" ||
              name == "nextn.post_projection.weight" || name == "nextn.pre_projection.weight" ||
-             name == "rope_freqs.weight") {
-+        if (name == "per_layer_token_embd.weight" || name == "output_res_score.weight") {
-+            output_misc_size += size;
-+            continue;
-+        }
-             continue;
-         }
-         if (name == "dflash_fc.weight" || name == "dflash_hidden_norm.weight" ||
 @@ -9578,6 +9586,7 @@
      cparams.mla_attn         = params.mla_attn;
      cparams.attn_max_batch   = params.attn_max_batch;

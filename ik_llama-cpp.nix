@@ -38,9 +38,6 @@ self: super: {
           ./patches/ik-llama-kimi-k3.patch
           ./patches/ik-llama-kimi-k3-requires-all.patch
           ./patches/ik-llama-deepseek41-kimi-fix.patch
-          # debug: print tensor info before GGML_ASSERT(cur->data != nullptr) in load_data_for
-          ./patches/ik-llama-debug-load-data-for.patch
-          ./patches/ik-llama-debug-quantize.patch
         ];
 
 
