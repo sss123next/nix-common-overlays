@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.27.1-unstable-2026-11-11";
+      version = "0.27.2-unstable-2026-11-12";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-11-11, "test(cli): deflake the hosted harness message-stop test (#16853) (#16855)"
-        rev = "1ab1d169b721706f6096cca1d1c18da78fa61b56";
-        sha256 = "83803a20877e3b02131bdf02eee721f1e599c203e64caf28780f1de099bb0022";
+        # main @ 2026-11-12
+        rev = "5e64e2d8a1517939b7c3b30c8e45cf447bde70cd";
+        sha256 = "sha256-aU2edMHMYmIKInFjDo5Y02jGJYn1xriMp+sjdONr+wA=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
