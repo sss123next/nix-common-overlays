@@ -287,3 +287,33 @@ index 050914f9..d5dffaf7 100644
      }
  
      if (check_tensors && !ggml_validate_row_data(cur->type, cur->data, ggml_nbytes(cur))) {
+diff --git a/src/llama-quantize.cpp b/src/llama-quantize.cpp
+index 80c59577..06256320 100644
+--- a/src/llama-quantize.cpp
++++ b/src/llama-quantize.cpp
+@@ -157,6 +157,9 @@ static void llama_tensor_dequantize_internal(
+         if (qtype.to_float == NULL) {
+             throw std::runtime_error(format("type %s unsupported for integer quantization: no dequantization available", ggml_type_name(tensor->type)));
+         }
++    } else if (tensor->type == GGML_TYPE_F8_E4M3) {
++        qtype = ggml_internal_get_type_traits(tensor->type);
++        GGML_ASSERT(qtype.to_float != NULL);
+     } else if (tensor->type != GGML_TYPE_F16 &&
+                tensor->type != GGML_TYPE_BF16) {
+         throw std::runtime_error(format("cannot dequantize/convert tensor type %s", ggml_type_name(tensor->type)));
+@@ -183,6 +186,15 @@ static void llama_tensor_dequantize_internal(
+                 qsrc += num_rows*row_size;
+                 f32_output += num_rows*tensor->ne[0];
+             }
++        } else if (tensor->type == GGML_TYPE_F8_E4M3) {
++            auto row_size = ggml_row_size(tensor->type, tensor->ne[0]);
++            int nrows = ggml_nrows(tensor);
++            auto qsrc = (const char *)tensor->data;
++            for (int row = 0; row < nrows; ++row) {
++                qtype.to_float(qsrc, f32_output, tensor->ne[0]);
++                qsrc += row_size;
++                f32_output += tensor->ne[0];
++            }
+         } else {
+             GGML_ABORT("fatal error"); // unreachable
+         }
