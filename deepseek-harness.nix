@@ -22,13 +22,14 @@ self: super: {
       pname = "deepseek-harness";
       # Release candidate tags exist; pinned to the most recent one.
       # Node 26 migration: nixpkgs default was nodejs_22 (below engine floor >=24.9.0).
-      version = "0.2.2-rc.1-unstable-2026-11-11";
+      # rc.3 adds @deepseek-ai/dsh-terminal-panel workspace dep.
+      version = "0.2.2-rc.3-unstable-2026-11-13";
 
       src = fetchFromGitHub {
         owner = "deepseek-ai";
         repo = "deepseek-harness";
-        rev = "refs/tags/dsh-v0.2.2-rc.1";
-        hash = "sha256-pzSBQbLwcT/wnCg4ugWq7YmRngCaFOiKVCjekI5aKa0=";
+        rev = "refs/tags/dsh-v0.2.2-rc.3";
+        hash = "sha256-0stwYEjQsZ3dfQbIhEN8kR1B/WxsnWDMZ84HIBDbnKg=";
       };
 
       # packageManager: pnpm@11.28.5 (nixpkgs pnpm_11 lags a bit; tolerated).
@@ -57,14 +58,14 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-D3dDgX55coJqEY31vwxiJuSFhlJeuEa3VfpN5Ooa+IE=";
+        hash = "sha256-md84fDBaEnqdQxlsTpaGTkGWWH1dLUGwlSp0EJ+aOA4=";
       };
 
       env.NODE_OPTIONS = "--max-old-space-size=4096";
       # fetchFromGitHub provides no .git; client-build-environment.ts reads this
       # public value instead of spawning `git rev-parse HEAD`, and its dirty
       # probe treats a missing git as "no metadata" (no dirty marker).
-      env.DSH_CLIENT_COMMIT_HASH = "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db";
+      env.DSH_CLIENT_COMMIT_HASH = "38a6a5c965aa99ab525161efb7cc5cf1fe62fced";
 
       # `pnpm run build` (scripts/build.ts) = build:native-system (flock Node-API
       # addon; needs the node headers next to process.execPath) + build:lib (tsc
