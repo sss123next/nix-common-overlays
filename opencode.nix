@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-igkJ2tUpyajZCHAER2+2Yl5Z4R4SiffHF/N9g+tKazg=";
+            "x86_64-linux"   = "sha256-16mdK+qKJ9n6MlyEMX82gzmDpCdP4qQXGL5ijtpV5wM=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -92,7 +92,7 @@ self: super: {
     in
     stdenv.mkDerivation (finalAttrs: {
       pname = "opencode";
-      version = "2.2.7";
+      version = "2.3.0";
 
       __structuredAttrs = true;
       strictDeps = true;
@@ -100,9 +100,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "94e070db9794829173b571161f06e61c1e892dd4";
+        rev = "46aefe3da30553099a8b8434d65aff1029a03235";
 #        ref = "production";
-        hash = "sha256-TTUyZYWKWB8yowAqhmXOk2AB/I66XixtnJ+EEAsQBYY=";
+        hash = "sha256-/Cc/eb3npKKUEUVM9sgjJtE67yrRWLDL2pwxBA2WPi0=";
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
