@@ -10,8 +10,8 @@ self: super: {
         owner = "QwenLM";
         repo = "qwen-code";
         # main @ 2026-11-14
-        rev = "114694062b83f69093a936a3caea4c35bdbeb41d";
-        sha256 = "sha256-NElJVhHiH/X7fLbgqfM0P0QwNy4A6aSrWyMn/5zMBjk=";
+        rev = "dab5253c628be736c8fdd43c9d9e36e8d1e9ff00";
+        sha256 = "sha256-sztd8O1jdCOhb5pFxa5nHnHyZRjrby6IF2bYcNo1DM0=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -40,7 +40,7 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-Hd+HddouueF007Iez+gexpfJVPGL2PxM+2s/rVbnRx0=";
+        hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
       };
 
       # Upstream now sets MAX_DOCUMENT_RUNTIME_BYTES = 2_132_000 (>= our 2_100_000 patch);
