@@ -1,3 +1,123 @@
+diff --git a/examples/mtmd/clip-impl.h b/examples/mtmd/clip-impl.h
+index 69999ad9..fab9a315 100644
+--- a/examples/mtmd/clip-impl.h
++++ b/examples/mtmd/clip-impl.h
+@@ -198,6 +198,7 @@ enum projector_type {
+     PROJECTOR_TYPE_MINIMAX_M3_VL,
+     PROJECTOR_TYPE_DEEPSEEK4V,
+     PROJECTOR_TYPE_DEEPSEEK41,
++    PROJECTOR_TYPE_DEEPSEEK41V,
+     PROJECTOR_TYPE_GLM4V,
+     PROJECTOR_TYPE_UNKNOWN,
+ 
+@@ -235,6 +236,7 @@ static std::map<projector_type, std::string> PROJECTOR_TYPE_NAMES = {
+     { PROJECTOR_TYPE_MINIMAX_M3_VL, "minimax_m3_vl"},
+     { PROJECTOR_TYPE_DEEPSEEK4V, "deepseek4v"},
+     { PROJECTOR_TYPE_DEEPSEEK41, "deepseek41"},
++    { PROJECTOR_TYPE_DEEPSEEK41V,"deepseek41v"},
+     { PROJECTOR_TYPE_GLM4V,      "glm4v"},
+ };
+ 
+diff --git a/examples/mtmd/clip.cpp b/examples/mtmd/clip.cpp
+index c7b95e55..5ddf4df0 100644
+--- a/examples/mtmd/clip.cpp
++++ b/examples/mtmd/clip.cpp
+@@ -3485,6 +3485,7 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
+                 res = graph.build_pixtral();
+             } break;
+         case PROJECTOR_TYPE_DEEPSEEK4V:
++        case PROJECTOR_TYPE_DEEPSEEK41V:
+             {
+                 res = graph.build_deepseek4v();
+             } break;
+@@ -3932,6 +3933,7 @@ struct clip_model_loader {
+                         hparams.set_warmup_n_tokens(256); // avoid OOM on warmup
+                     } break;
+                 case PROJECTOR_TYPE_DEEPSEEK4V:
++                case PROJECTOR_TYPE_DEEPSEEK41V:
+                 case PROJECTOR_TYPE_DEEPSEEK41:
+                     {
+                         hparams.rope_theta = 10000.0f;
+@@ -3939,7 +3941,7 @@ struct clip_model_loader {
+                         get_u32(KEY_IMAGE_MIN_PIXELS,  hparams.image_min_pixels);
+                         hparams.dsv4_max_n_token  = 384;
+                         hparams.dsv4_max_wh_ratio = 8;
+-                        if (model.proj_type == PROJECTOR_TYPE_DEEPSEEK41) {
++                        if (model.proj_type == PROJECTOR_TYPE_DEEPSEEK41 || model.proj_type == PROJECTOR_TYPE_DEEPSEEK41V) {
+                             hparams.dsv4_max_n_token  = 1024;
+                             hparams.dsv4_max_wh_ratio = 0;
+                             get_u32("clip.vision.dsv4_max_n_token", hparams.dsv4_max_n_token);
+@@ -4573,6 +4575,7 @@ struct clip_model_loader {
+                     model.mm_1_b = get_tensor(string_format(TN_LLAVA_PROJ, 1, "bias"));
+                 } break;
+             case PROJECTOR_TYPE_DEEPSEEK4V:
++            case PROJECTOR_TYPE_DEEPSEEK41V:
+             case PROJECTOR_TYPE_DEEPSEEK41:
+                 {
+                     model.mm_1_w = get_tensor(string_format(TN_LLAVA_PROJ, 1, "weight"));
+@@ -4583,7 +4586,7 @@ struct clip_model_loader {
+                     model.image_newline        = get_tensor(TN_IMAGE_NEWLINE_V); // deepseek4v mmproj uses the v. prefix
+                     model.token_embd_img_start = get_tensor(TN_TOK_IMG_START);
+                     model.token_embd_img_end   = get_tensor(TN_TOK_IMG_END);
+-                    model.token_embd_img_pad   = get_tensor(TN_TOK_IMG_PAD, model.proj_type == PROJECTOR_TYPE_DEEPSEEK4V);
++                    model.token_embd_img_pad   = get_tensor(TN_TOK_IMG_PAD, model.proj_type != PROJECTOR_TYPE_DEEPSEEK41);
+                 } break;
+             default:
+                 GGML_ASSERT(false && "unknown projector type");
+@@ -5667,6 +5670,7 @@ bool clip_image_preprocess(struct clip_ctx * ctx, const clip_image_u8 * img, str
+             } break;
+ 
+         case PROJECTOR_TYPE_DEEPSEEK4V:
++        case PROJECTOR_TYPE_DEEPSEEK41V:
+             {
+                 // resize solver picks the largest size whose LLM token block fits max_n_token
+                 // (port of load_image / safe_resize / solve_resize_ratio / grid_tokens)
+@@ -6089,6 +6093,7 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
+                 n_patches += 2; // for BOI and EOI token embeddings
+             } break;
+         case PROJECTOR_TYPE_DEEPSEEK4V:
++        case PROJECTOR_TYPE_DEEPSEEK41V:
+             {
+                 const int out_patch_size = params.patch_size * params.n_merge;
+                 const int n_llm_w = CLIP_ALIGN(img->nx, out_patch_size) / out_patch_size;
+@@ -6585,6 +6590,7 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
+                 set_input_i32("pos_w", pos_data);
+             } break;
+         case PROJECTOR_TYPE_DEEPSEEK4V:
++        case PROJECTOR_TYPE_DEEPSEEK41V:
+             {
+                 // set the 2D positions (mrope layout, only the first 2 channels are used)
+                 int n_patches_per_row = image_size_width / patch_size;
+@@ -6739,6 +6745,7 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
+         case PROJECTOR_TYPE_KIMIVL:
+         case PROJECTOR_TYPE_KIMIK25:
+         case PROJECTOR_TYPE_DEEPSEEK4V:
++        case PROJECTOR_TYPE_DEEPSEEK41V:
+         case PROJECTOR_TYPE_DEEPSEEK41:
+             return ctx->model.mm_2_w->ne[1];
+         case PROJECTOR_TYPE_COGVLM:
+diff --git a/examples/mtmd/mtmd.cpp b/examples/mtmd/mtmd.cpp
+index 631ced39..55eefd49 100644
+--- a/examples/mtmd/mtmd.cpp
++++ b/examples/mtmd/mtmd.cpp
+@@ -325,7 +325,7 @@ struct mtmd_context {
+                 img_end = "<|media_end|>";
+             }
+         }
+-        else if (proj == PROJECTOR_TYPE_DEEPSEEK4V || proj == PROJECTOR_TYPE_DEEPSEEK41) {
++        else if (proj == PROJECTOR_TYPE_DEEPSEEK4V || proj == PROJECTOR_TYPE_DEEPSEEK41V || proj == PROJECTOR_TYPE_DEEPSEEK41) {
+             // markers are learned embeddings emitted by the encoder graph
+             img_beg = "";
+             img_end = "";
+@@ -655,7 +655,7 @@ struct mtmd_tokenizer {
+                 }
+ 
+             } else {
+-                if (ctx->proj_type_v() == PROJECTOR_TYPE_DEEPSEEK4V) {
++                if (ctx->proj_type_v() == PROJECTOR_TYPE_DEEPSEEK4V || ctx->proj_type_v() == PROJECTOR_TYPE_DEEPSEEK41V) {
+                     // align the image block to the 4-token CSA compress boundary
+                     constexpr int32_t align = 4;
+                     size_t n_past = 0;
 diff --git a/ggml/include/ggml.h b/ggml/include/ggml.h
 index c8134f08..e25aaab6 100644
 --- a/ggml/include/ggml.h
@@ -288,7 +408,7 @@ index 050914f9..d5dffaf7 100644
  
      if (check_tensors && !ggml_validate_row_data(cur->type, cur->data, ggml_nbytes(cur))) {
 diff --git a/src/llama-quantize.cpp b/src/llama-quantize.cpp
-index 80c59577..06256320 100644
+index 15c0b3b9..567b99a4 100644
 --- a/src/llama-quantize.cpp
 +++ b/src/llama-quantize.cpp
 @@ -157,6 +157,9 @@ static void llama_tensor_dequantize_internal(
