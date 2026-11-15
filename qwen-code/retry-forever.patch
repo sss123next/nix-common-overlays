@@ -1,0 +1,165 @@
+diff --git a/packages/core/src/utils/retry.ts b/packages/core/src/utils/retry.ts
+index d8e5aebc04..faa5880abb 100644
+--- a/packages/core/src/utils/retry.ts
++++ b/packages/core/src/utils/retry.ts
+@@ -29,6 +29,47 @@ const PERSISTENT_MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes — single retry b
+ const PERSISTENT_CAP_MS = 6 * 60 * 60 * 1000; // 6 hours — absolute single wait cap
+ const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
+ 
++/**
++ * Fixed-interval persistent retry (unattended gateway mode).
++ *
++ * When QWEN_CODE_RETRY_FIXED_MS is set to a positive number of milliseconds,
++ * persistent mode is widened and pinned:
++ *  - every error that is neither an abort nor an authentication/access-denied
++ *    failure (HTTP 401/403 or the credential/billing provider codes relayed
++ *    without a status) enters the unbounded persistent loop — any status, any
++ *    error class, caller-supplied shouldRetryOnError predicates cannot veto it;
++ *  - each wait is exactly this many milliseconds — provider Retry-After and
++ *    the exponential ladder are both bypassed;
++ *  - the transient-quota fast-fails (Qwen OAuth tier, allocated-quota,
++ *    permanent quota exhaustion) become retryable instead of terminal.
++ * Authentication and access-denied failures stay fail-fast: the classifier
++ * marks them so and the patch never widens past that verdict.
++ */
++function getPersistentFixedDelayMs(): number | null {
++  const raw = process.env['QWEN_CODE_RETRY_FIXED_MS'];
++  if (raw === undefined || raw.trim() === '') return null;
++  const value = Number(raw);
++  if (!Number.isFinite(value) || value < 100) return null;
++  // Never exceed the setTimeout ceiling (a larger delay would fire immediately).
++  return Math.min(Math.floor(value), 2_147_483_647);
++}
++
++// Permanent provider codes that mean "the credential or its entitlement is
++// wrong" — the statusless-stream relay of a 401/403/402. Fixed-interval mode
++// keeps these terminal, exactly like the HTTP 401/403 'auth-error' verdict.
++// Deliberately absent: content_filter, invalid_request_error, context-length,
++// request-too-large and friends — under fixed-interval mode the user asked for
++// everything-but-auth to retry, so those re-enter the loop.
++const AUTH_TERMINAL_PROVIDER_CODES = new Set([
++  'invalid_api_key',
++  'authentication_error',
++  'permission_error',
++  'model_access_denied',
++  'billing_error',
++  'arrearage',
++  'insufficient_quota',
++]);
++
+ export interface HttpError extends Error {
+   status?: number;
+ }
+@@ -252,6 +293,10 @@ async function observedDelay(
+  * Retries a function with exponential backoff and jitter.
+  * Supports persistent retry mode for unattended/CI environments where transient
+  * capacity errors (429/529) should be retried indefinitely rather than failing.
++ * With QWEN_CODE_RETRY_FIXED_MS set, persistent mode additionally retries every
++ * non-abort error (any status, any caller predicate) forever, waiting exactly
++ * that many milliseconds between attempts; 401/403 and credential/billing
++ * provider codes remain fail-fast.
+  * @param fn The asynchronous function to retry.
+  * @param options Optional retry configuration.
+  * @returns A promise that resolves with the result of the function if successful.
+@@ -297,6 +342,9 @@ export async function retryWithBackoff<T>(
+   const maxBackoff = persistentMaxBackoffMs ?? PERSISTENT_MAX_BACKOFF_MS;
+   const capMs = persistentCapMs ?? PERSISTENT_CAP_MS;
+   const heartbeatInterval = heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS;
++  // Env-gated fixed interval; when set, it also widens persistent eligibility
++  // (see getPersistentFixedDelayMs).
++  const fixedDelayMs = persistent ? getPersistentFixedDelayMs() : null;
+ 
+   let attempt = 0;
+   let persistentAttempt = 0;
+@@ -388,7 +436,11 @@ export async function retryWithBackoff<T>(
+       }
+ 
+       // Check for Qwen OAuth quota exceeded error - throw immediately without retry
+-      if (authType === AuthType.QWEN_OAUTH && isQwenQuotaExceededError(error)) {
++      if (
++        fixedDelayMs === null &&
++        authType === AuthType.QWEN_OAUTH &&
++        isQwenQuotaExceededError(error)
++      ) {
+         debugLogger.error(
+           'Qwen OAuth quota exceeded, fast-failing',
+           fullClassification,
+@@ -411,7 +463,7 @@ export async function retryWithBackoff<T>(
+       // friendly message so the session does not hang through the full retry
+       // budget with no output. Applies to any auth type since a reset time is
+       // the universal signal of a permanently exhausted quota.
+-      if (isQuotaExhaustedError(error)) {
++      if (fixedDelayMs === null && isQuotaExhaustedError(error)) {
+         debugLogger.error(
+           'Quota exhausted, fast-failing',
+           fullClassification,
+@@ -443,8 +495,21 @@ export async function retryWithBackoff<T>(
+       // path so the request still gets a few attempts but is guaranteed to
+       // terminate.
+       const isFailFast = fullClassification.diagnosis === 'fail-fast';
++      // Fixed-interval mode widens the persistent gate past the 429/529
++      // capacity statuses and past caller predicates: everything except aborts
++      // (rethrown above) and authentication/access-denied failures retries
++      // forever. Auth is terminal on both shapes the classifier produces for
++      // it: the 401/403 'auth-error' verdict and the statusless relay of
++      // credential/billing provider codes.
++      const isAuthTerminal =
++        fullClassification.reason === 'auth-error' ||
++        (fullClassification.reason === 'permanent-provider-code' &&
++          AUTH_TERMINAL_PROVIDER_CODES.has(fullClassification.providerCode ?? ''));
+       const shouldPersist =
+-        persistent && isTransient && callerAllowsRetry && !isFailFast;
++        persistent &&
++        (fixedDelayMs !== null
++          ? !isAuthTerminal
++          : isTransient && callerAllowsRetry && !isFailFast);
+ 
+       // Check if we've exhausted retries or shouldn't retry
+       if (!shouldPersist) {
+@@ -459,24 +524,29 @@ export async function retryWithBackoff<T>(
+       if (shouldPersist) {
+         persistentAttempt++;
+ 
+-        const retryAfterMs =
+-          hasRetryAfterStatus(errorStatus) ||
+-          error instanceof ResponsesHttpError
+-            ? getRetryAfterDelayMs(error)
+-            : null;
+-
+-        if (retryAfterMs !== null && retryAfterMs > 0) {
+-          // Retry-After is a server-specified wait — respect it, only cap at
+-          // the absolute limit (capMs/6h), NOT at maxBackoff (5min).
+-          delayMs = Math.min(retryAfterMs, capMs);
++        if (fixedDelayMs !== null) {
++          // Fixed interval: bypass Retry-After and the exponential ladder.
++          delayMs = fixedDelayMs;
+         } else {
+-          // Exponential backoff — cap at maxBackoff (5min) then absolute cap
+-          delayMs = getRetryDelayMs({
+-            attempt: persistentAttempt,
+-            initialDelayMs,
+-            maxDelayMs: Math.min(maxBackoff, capMs),
+-            jitterRatio: 0.25,
+-          });
++          const retryAfterMs =
++            hasRetryAfterStatus(errorStatus) ||
++            error instanceof ResponsesHttpError
++              ? getRetryAfterDelayMs(error)
++              : null;
++
++          if (retryAfterMs !== null && retryAfterMs > 0) {
++            // Retry-After is a server-specified wait — respect it, only cap at
++            // the absolute limit (capMs/6h), NOT at maxBackoff (5min).
++            delayMs = Math.min(retryAfterMs, capMs);
++          } else {
++            // Exponential backoff — cap at maxBackoff (5min) then absolute cap
++            delayMs = getRetryDelayMs({
++              attempt: persistentAttempt,
++              initialDelayMs,
++              maxDelayMs: Math.min(maxBackoff, capMs),
++              jitterRatio: 0.25,
++            });
++          }
+         }
+ 
+         const reportedAttempt = persistentAttempt;
