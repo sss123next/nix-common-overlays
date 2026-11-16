@@ -40,6 +40,10 @@ self: super: {
         urllib3
         deno
         yt-dlp-ejs
+        # curl-cffi — для impersonation (имитация браузера при запросах к YouTube)
+        # Без него yt-dlp не может подделать TLS-отпечаток, и YouTube охотнее
+        # отдаёт 429 на субтитры и другие запросы.
+        super.python3Packages.curl-cffi
       ];
       # makeWrapperArgs — список ОТДЕЛЬНЫХ аргументов: wrap-python-hook больше не бьёт
       # строки по пробелам, поэтому прежний вариант одной строкой
