@@ -27,12 +27,17 @@ self: super: {
           url = "https://github.com/MusicPlayerDaemon/MPD";
           ref = "master";
         };
-        mesonFlags = oldAttrs.mesonFlags ++ [
-          "-Dsoxr=enabled"
-          "-Dqobuz=disabled"
-          "-Dhtml_manual=false"
-          "-Dsystemd=disabled"
-        ];
+        # nixpkgs generates -Dmms=disabled for knownFeatures not in features,
+        # but mms was removed from git master → filter it out here too.
+        mesonFlags = builtins.filter
+          (f: !lib.hasPrefix "-Dmms=" f)
+          oldAttrs.mesonFlags
+          ++ [
+            "-Dsoxr=enabled"
+            "-Dqobuz=disabled"
+            "-Dhtml_manual=false"
+            "-Dsystemd=disabled"
+          ];
         patches = [ ];
         postPatch = "";
         doCheck = false;
