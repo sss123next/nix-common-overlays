@@ -4,13 +4,14 @@ self: super: {
     with super;
     let
       pname = "qtcreator_my";
-      version = "25.0.0-unstable-2026-11-04";
+      # IDE_VERSION 21.0.82 / IDE_VERSION_DISPLAY 22.0.0-beta1 на мастере
+      version = "21.0.82-unstable-2026-11-18";
 
       src = fetchFromGitHub {
         owner = "qt-creator";
         repo = "qt-creator";
-        rev = "313a78b1d0598911a1822faf4381ac19cf90b391";
-        hash = "sha256-CozT3oTku8REv+Bj35LPItqj0ZZ90dmL1dkWlZjGzMs=";
+        rev = "943f54e3451fb32e54e1e828423ea8d534eea4f1";
+        hash = "sha256-wsKKS5k2B4UFm6YdIeNcRs4Q+g5FDsEAP5TyDElfMi8=";
       };
 
       # Go modules for cmdbridge (go.mod unchanged on master, vendor hash unchanged)
