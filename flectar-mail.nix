@@ -12,16 +12,16 @@ self: super: {
     in
     rustPlatform.buildRustPackage {
       pname = "flectar-mail";
-      version = "0.1.0-unstable-2026-11-09";
+      version = "0.1.0-unstable-2026-11-18";
 
       src = fetchgit {
         url = "https://github.com/flectar/mail";
-        rev = "705e65907c9b29881d9982415e89e470c80e4caf";
-        sha256 = "sha256-6Hnpfn0AEaMbswOENU4RKzJvH9WzqrbZjVXJanAn4+Q=";
+        rev = "29793f68ac4738e2f116fcbaf7c4d59335b95c17";
+        sha256 = "sha256-AfZet0nCcHxZZpyHYhgldZA5qWdoj8Q5jWvO3BHECA4=";
         fetchSubmodules = true;
       };
 
-      cargoHash = "sha256-ILFHYKm4+pQ7OfGw3NY0xXrZaU0+9oCbVqAqGcz0ixI=";
+      cargoHash = "sha256-iEaa8lFROzeqVv+kwpkCIEkeSXiJ1+w4/Ckx362SAdU=";
 
       nativeBuildInputs = [
         pkg-config
