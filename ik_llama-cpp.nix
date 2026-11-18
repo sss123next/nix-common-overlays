@@ -7,15 +7,15 @@ self: super: {
       let
         # Пин апстрима: релизных тегов у ik_llama.cpp нет (только стаб t0002),
         # см. research/nix-overlays/git-version-packaging.
-        srcRev = "fcf7b364786ec621d0c53eae39223efc5492b8c5";
+        srcRev = "59754241f19833038a44ba76112dc19d199850d8";
         # Реквизиты для build-info (в tarball'е .git нет → git-ветка не сработает):
-        # 5244 = rev-list --count main на момент пина srcRev.
-        buildNumber = "5244";
-        buildCommit = "fcf7b364";
+        # 5261 = rev-list --count main на момент пина srcRev.
+        buildNumber = "5261";
+        buildCommit = "59754241";
       in
       {
         pname = "ik_llama-cpp";
-        version = "unstable-2026-11-15";
+        version = "unstable-2026-11-18";
 
         # fetchGit с ref без rev невозможен в pure-mode (flake eval падает:
         # "in pure evaluation mode, 'fetchGit' doesn't fetch unlocked input"),
@@ -24,7 +24,7 @@ self: super: {
           owner = "ikawrakow";
           repo = "ik_llama.cpp";
           rev = srcRev;
-          hash = "sha256-XT9ShvHLunVDbVRZFmEZO7ufjdP/12oRZszDev8/HyM=";
+          hash = "sha256-eue8MNAhRsrkZ3pvQzkVcMCTmA+BxXobFXmPc7sXUVQ=";
         };
 
         # --print-stats / --no-print-stats / --stats-interval N: тонкий вывод
@@ -34,7 +34,6 @@ self: super: {
         patches = [
           ./patches/ik-llama-stats-interval.patch
           ./patches/ik-llama-json-schema-pattern.patch
-          ./patches/ik-llama-f8-e4m3.patch
           ./patches/ik-llama-kimi-k3.patch
           ./patches/ik-llama-kimi-k3-requires-all.patch
           ./patches/ik-llama-deepseek41-kimi-fix.patch

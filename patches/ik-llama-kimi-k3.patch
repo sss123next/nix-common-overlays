@@ -1,14 +1,14 @@
---- a/src/llama-arch.cpp	2026-11-09 05:47:25.931550380 +0300
-+++ b/src/llama-arch.cpp	2026-11-09 05:51:06.332438367 +0300
-@@ -107,6 +107,7 @@
-     { LLM_ARCH_SPARK2_5,        "spark2_5"     },
+--- a/src/llama-arch.cpp
++++ b/src/llama-arch.cpp
+@@ -110,6 +110,7 @@ static const std::map<llm_arch, const ch
      { LLM_ARCH_RAON1,           "raon1"        },
+     { LLM_ARCH_RAON1_NANO,      "raon1nano"    },
      { LLM_ARCH_XING4_0,         "xing4_0"      },
 +    { LLM_ARCH_KIMI_K3,         "kimi-k3"      },
      { LLM_ARCH_UNKNOWN,         "(unknown)"    },
  };
  
-@@ -165,12 +166,14 @@
+@@ -168,12 +169,14 @@ static const std::map<llm_kv, const char
      { LLM_KV_EXPERT_WEIGHTS_SCALE,              "%s.expert_weights_scale"              },
      { LLM_KV_EXPERT_WEIGHTS_NORM,               "%s.expert_weights_norm"               },
      { LLM_KV_EXPERT_GATING_FUNC,                "%s.expert_gating_func"                },
@@ -23,32 +23,25 @@
      { LLM_KV_NUM_DEEPSTACK_LAYERS,              "%s.n_deepstack_layers"                },
      { LLM_KV_POOLING_TYPE,                      "%s.pooling_type"                      },
      { LLM_KV_LOGIT_SCALE,                       "%s.logit_scale"                       },
-@@ -397,6 +400,7 @@
-     case LLM_ARCH_LFM2MOE:
+@@ -401,6 +404,7 @@ bool llm_arch_is_hybrid(const llm_arch &
      case LLM_ARCH_LFM3:
      case LLM_ARCH_RAON1:
+     case LLM_ARCH_RAON1_NANO:
 +    case LLM_ARCH_KIMI_K3:
          return true;
      default:
          return false;
-+@@ -396,7 +399,7 @@
-+ 
-+ bool llm_arch_requires_all_graph_output_rows(const llm_arch & arch) {
-+-    return arch == LLM_ARCH_DFLASH2;
-++    return arch == LLM_ARCH_DFLASH2 || arch == LLM_ARCH_KIMI_K3;
-+ }
- 
---- a/src/llama-arch.h	2026-11-09 05:47:25.931550380 +0300
-+++ b/src/llama-arch.h	2026-11-09 05:50:31.886070498 +0300
-@@ -105,6 +105,7 @@
-     LLM_ARCH_SPARK2_5,
-     LLM_ARCH_RAON1,
+--- a/src/llama-arch.h
++++ b/src/llama-arch.h
+@@ -108,6 +108,7 @@ enum llm_arch {
+     LLM_ARCH_RAON1_NANO,
      LLM_ARCH_XING4_0,
+     LLM_ARCH_STEP5,
 +    LLM_ARCH_KIMI_K3,
      LLM_ARCH_UNKNOWN,
  };
  
-@@ -143,6 +144,7 @@
+@@ -146,6 +147,7 @@ enum llm_kv {
      LLM_KV_EXPERT_WEIGHTS_SCALE,
      LLM_KV_EXPERT_WEIGHTS_NORM,
      LLM_KV_EXPERT_GATING_FUNC,
@@ -56,7 +49,7 @@
      // K2 Horizon MoVA
      LLM_KV_ATTENTION_GROUPNORM_GROUPS,
      LLM_KV_ATTENTION_VALUE_EXPERT_COUNT,
-@@ -152,6 +154,7 @@
+@@ -155,6 +157,7 @@ enum llm_kv {
      LLM_KV_NUM_DEEPSTACK_LAYERS,
      LLM_KV_POOLING_TYPE,
      LLM_KV_LOGIT_SCALE,
@@ -64,9 +57,9 @@
      LLM_KV_DECODER_START_TOKEN_ID,
      LLM_KV_ATTN_LOGIT_SOFTCAPPING,
      LLM_KV_ROUTER_LOGIT_SOFTCAPPING,
-@@ -577,6 +580,14 @@
-     LLM_TENSOR_SHORTCONV_OUTPROJ,
-     LLM_TENSOR_ATTN_VRES_LAMBDA,
+@@ -584,6 +587,14 @@ enum llm_tensor {
+     LLM_TENSOR_HC_ATTN_CHART,
+     LLM_TENSOR_HC_FFN_CHART,
  
 +    // kimi-k3
 +    LLM_TENSOR_ATTN_RES_SCORE,
@@ -79,11 +72,11 @@
      LLM_TENSOR_UNKNOWN,
  };
  
---- a/src/llama-build-context.cpp	2026-11-09 05:47:25.931550380 +0300
-+++ b/src/llama-build-context.cpp	2026-11-09 05:50:31.886435215 +0300
-@@ -3443,6 +3443,10 @@
+--- a/src/llama-build-context.cpp
++++ b/src/llama-build-context.cpp
+@@ -3750,6 +3750,10 @@ ggml_cgraph * llm_build_context::llama_b
              {
-                 result = llm.build_raon1();
+                 result = llm.build_raon1nano();
              } break;
 +        case LLM_ARCH_KIMI_K3:
 +            {
@@ -92,28 +85,28 @@
          case LLM_ARCH_XING4_0:
              {
                  result = llm.build_xing4();
---- a/src/llama-build-context.h	2026-11-09 05:47:25.931550380 +0300
-+++ b/src/llama-build-context.h	2026-11-09 05:50:31.886699708 +0300
-@@ -469,6 +469,7 @@
-     ggml_cgraph * build_bailingmoe3();
-     ggml_cgraph * build_glm5next();
+--- a/src/llama-build-context.h
++++ b/src/llama-build-context.h
+@@ -500,6 +500,7 @@ struct llm_build_context {
      ggml_cgraph * build_raon1();
+     ggml_cgraph * build_raon1nano();
+     ggml_cgraph * build_raon1nano_mtp();
 +    ggml_cgraph * build_kimi_k3();
      ggml_cgraph * build_xing4();
  
      ggml_cgraph * build_glm5next_mtp();
---- a/src/llama.cpp	2026-11-09 05:49:28.348560815 +0300
-+++ b/src/llama.cpp	2026-11-09 05:50:31.890573589 +0300
-@@ -10541,6 +10541,7 @@
-         case LLM_ARCH_JAIS:
-         case LLM_ARCH_GLM5NEXT:
+--- a/src/llama.cpp
++++ b/src/llama.cpp
+@@ -10618,6 +10618,7 @@ enum llama_rope_type llama_rope_type(con
          case LLM_ARCH_GLM5NEXT_DASHED:
+         case LLM_ARCH_RAON1_NANO:
+         case LLM_ARCH_RAON1:
 +        case LLM_ARCH_KIMI_K3:
              return LLAMA_ROPE_TYPE_NONE;
  
- }
---- a/src/llama-hparams.cpp	2026-11-09 05:49:28.347365252 +0300
-+++ b/src/llama-hparams.cpp	2026-11-09 05:51:06.337079746 +0300
+         // use what we call a normal RoPE, operating on pairs of consecutive head values
+--- a/src/llama-hparams.cpp
++++ b/src/llama-hparams.cpp
 @@ -8,7 +8,7 @@
  #include <limits>
  #include <map>
@@ -123,7 +116,7 @@
  
  static const std::map<llama_rope_scaling_type, const char *> LLAMA_ROPE_SCALING_TYPES = {
      { LLAMA_ROPE_SCALING_TYPE_NONE,   "none"   },
-@@ -1019,7 +1019,10 @@
+@@ -1020,7 +1020,10 @@ void llm_load_hparams(
                  ml.get_key(LLM_KV_ATTENTION_VALUE_LENGTH_MLA,  hparams.n_embd_head_v_mla_impl);
                  ml.get_key(LLM_KV_ATTENTION_Q_LORA_RANK,       hparams.n_lora_q);
                  ml.get_key(LLM_KV_ATTENTION_KV_LORA_RANK,      hparams.n_lora_kv);
@@ -135,7 +128,7 @@
  
                  ml.get_key(LLM_KV_SSM_CONV_KERNEL,             hparams.ssm_d_conv);
                  ml.get_key(LLM_KV_SSM_INNER_SIZE,              hparams.ssm_d_inner, false);
-@@ -1066,6 +1069,72 @@
+@@ -1077,6 +1080,72 @@ void llm_load_hparams(
  
                  model.type = e_model::MODEL_UNKNOWN;
              } break;
@@ -208,9 +201,9 @@
          case LLM_ARCH_QWEN35MOE:
              {
                  ml.get_key(LLM_KV_EXPERT_FEED_FORWARD_LENGTH,        hparams.n_ff_exp, false);
---- a/src/llama-hparams.h	2026-11-09 05:47:25.932550384 +0300
-+++ b/src/llama-hparams.h	2026-11-09 05:50:31.887141112 +0300
-@@ -116,6 +116,10 @@
+--- a/src/llama-hparams.h
++++ b/src/llama-hparams.h
+@@ -116,6 +116,10 @@ struct llama_hparams {
      bool     kda_safe_gate = false;
      float    kda_gate_lower_bound = 0.0f;
  
@@ -221,17 +214,17 @@
      // for hybrid state-space models (e.g. qwen3next)
      std::array<bool, LLAMA_MAX_LAYERS> recurrent_layer_arr;
  
---- a/src/llama-load-tensors.cpp	2026-11-09 05:47:25.932550384 +0300
-+++ b/src/llama-load-tensors.cpp	2026-11-09 06:01:34.073931499 +0300
-@@ -178,6 +178,7 @@
-     bool create_bailingmoe3_tensors(const LLM_TN & tn);
+--- a/src/llama-load-tensors.cpp
++++ b/src/llama-load-tensors.cpp
+@@ -179,6 +179,7 @@ struct create_tensors_helper : public cr
      bool create_glm5next_tensors(const LLM_TN & tn);
      bool create_raon1_tensors(const LLM_TN & tn);
+     bool create_raon1nano_tensors(const LLM_TN & tn);
 +    bool create_kimi_k3_tensors(const LLM_TN & tn);
      bool create_xing4_tensors(const LLM_TN & tn);
  
      bool create_minimaxm2_tensors(const LLM_TN & tn);
-@@ -5320,6 +5321,124 @@
+@@ -5477,6 +5478,124 @@ bool create_tensors_helper::create_raon1
      return use_mmap_buffer;
  }
  
@@ -267,7 +260,7 @@
 +        auto & layer = model.layers[il];
 +        ggml_context * ctx_layer = ctx_for_layer(il);
 +        ggml_context * ctx_split = ctx_for_layer_split(il);
-+        const bool graph_or_attn = model.split_mode == LLAMA_SPLIT_MODE_GRAPH || model.split_mode == LLAMA_SPLIT_MODE_ATTN;
++        const bool graph_or_attn = model.split_mode == LLAMA_SPLIT_MODE_GRAPH;
 +        ggml_context * norm_ctx = graph_or_attn ? ctx_split : ctx_layer;
 +        ggml_context * moe_ctx  = graph_or_attn ? ctx_split : ctx_layer;
 +
@@ -356,18 +349,18 @@
  bool create_tensors_helper::create_ernie45_tensors(const LLM_TN & tn) {
      LOADING_PRELUDE
  
-@@ -6563,6 +6682,8 @@
-             use_mmap_buffer = create_glm5next_tensors(tn); break;
-         case LLM_ARCH_RAON1:
-             use_mmap_buffer = create_raon1_tensors(tn); break;
+@@ -6749,6 +6868,8 @@ bool create_tensors_helper::create_tenso
+         case LLM_ARCH_RAON1_NANO:
+             use_mmap_buffer = create_raon1nano_tensors(tn); break;
+         case LLM_ARCH_XING4_0:
 +        case LLM_ARCH_KIMI_K3:
 +            use_mmap_buffer = create_kimi_k3_tensors(tn); break;
-         case LLM_ARCH_XING4_0:
              use_mmap_buffer = create_xing4_tensors(tn); break;
          case LLM_ARCH_MINIMAX_M2:
---- a/src/llama-model.cpp	2026-11-09 05:49:28.345780737 +0300
-+++ b/src/llama-model.cpp	2026-11-09 05:50:31.889141958 +0300
-@@ -2598,6 +2598,61 @@
+             use_mmap_buffer = create_minimaxm2_tensors(tn); break;
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -2682,6 +2682,61 @@ static const std::map<llm_arch, std::map
          },
      },
      {
@@ -429,7 +422,7 @@
          LLM_ARCH_UNKNOWN,
          {
              { LLM_TENSOR_TOKEN_EMBD,         "token_embd" },
-@@ -2876,6 +2931,7 @@
+@@ -2962,6 +3017,7 @@ const char * llama_model_type_name(e_mod
          case MODEL_235B_A22B:     return "235B.A22B";
          case MODEL_310B_A15B:     return "310B.A15B";
          case MODEL_312B_A17B:     return "312B.A17B";
@@ -437,9 +430,9 @@
          case MODEL_300B_A47B:     return "300B.A47B";
          case MODEL_355B_A32B:     return "355B.A32B";
          case MODEL_397B_A17B:     return "397B.A17B";
---- a/src/llama-model.h	2026-11-09 05:47:25.933550388 +0300
-+++ b/src/llama-model.h	2026-11-09 05:50:31.889355816 +0300
-@@ -127,6 +127,7 @@
+--- a/src/llama-model.h
++++ b/src/llama-model.h
+@@ -127,6 +127,7 @@ enum e_model {
      MODEL_235B_A22B,
      MODEL_310B_A15B,
      MODEL_312B_A17B,
@@ -447,7 +440,7 @@
      MODEL_300B_A47B, // Ernie MoE big
      MODEL_355B_A32B,
      MODEL_397B_A17B, // Qwen-3.5-MoE
-@@ -341,6 +342,14 @@
+@@ -341,6 +342,14 @@ struct llama_layer {
      struct ggml_tensor * attn_v_gate_b = nullptr;
      struct ggml_tensor * attn_v_exps   = nullptr;
  
@@ -462,7 +455,7 @@
      llama_split_tensor split_ffn_up_shexp;
      llama_split_tensor split_ffn_gate_shexp;
      llama_split_tensor split_ffn_down_shexp;
-@@ -578,6 +587,7 @@
+@@ -580,6 +589,7 @@ struct llama_model {
      struct ggml_tensor * hc_head_base = nullptr;
      struct ggml_tensor * hc_head_fn = nullptr;
      struct ggml_tensor * hc_head_scale = nullptr;
@@ -470,12 +463,12 @@
  
      // engram hash constants, indexed [engram layer][ngram] and [engram layer][(ngram-1)*n_head
      // + head]. They index straight into engram_embd, so the loader validates their counts.
-@@ -692,7 +702,7 @@
+@@ -695,7 +705,7 @@ struct llama_model {
      }
  
      bool is_mla_model() const {
--        return arch == LLM_ARCH_DEEPSEEK2 || arch == LLM_ARCH_GLM_DSA || arch == LLM_ARCH_MISTRAL4 || arch == LLM_ARCH_BAILINGMOE3 || arch == LLM_ARCH_GLM5NEXT || arch == LLM_ARCH_RAON1 || arch == LLM_ARCH_XING4_0;
-+        return arch == LLM_ARCH_DEEPSEEK2 || arch == LLM_ARCH_GLM_DSA || arch == LLM_ARCH_MISTRAL4 || arch == LLM_ARCH_BAILINGMOE3 || arch == LLM_ARCH_GLM5NEXT || arch == LLM_ARCH_RAON1 || arch == LLM_ARCH_XING4_0 || arch == LLM_ARCH_KIMI_K3;
+-        return arch == LLM_ARCH_DEEPSEEK2 || arch == LLM_ARCH_GLM_DSA || arch == LLM_ARCH_MISTRAL4 || arch == LLM_ARCH_BAILINGMOE3 || arch == LLM_ARCH_GLM5NEXT || arch == LLM_ARCH_RAON1 || arch == LLM_ARCH_RAON1_NANO || arch == LLM_ARCH_XING4_0;
++        return arch == LLM_ARCH_DEEPSEEK2 || arch == LLM_ARCH_GLM_DSA || arch == LLM_ARCH_MISTRAL4 || arch == LLM_ARCH_BAILINGMOE3 || arch == LLM_ARCH_GLM5NEXT || arch == LLM_ARCH_RAON1 || arch == LLM_ARCH_RAON1_NANO || arch == LLM_ARCH_XING4_0 || arch == LLM_ARCH_KIMI_K3;
      }
  
      float swiglu_limit(uint32_t il, bool shared) const {
