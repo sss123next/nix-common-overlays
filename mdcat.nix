@@ -2,16 +2,16 @@
 self: super: {
   mdcat = super.rustPlatform.buildRustPackage rec {
     pname = "mdcat";
-    version = "2.18.0";
+    version = "2.20.1";
 
     src = super.fetchFromGitHub {
       owner = "BIRSAx2";
       repo = "mdcat";
       rev = "mdcat-${version}";
-      hash = "sha256-wCWyOSiKvKEJltswRoZuzo+6Pfs+dS4V7uCCXukB7aE=";
+      hash = "sha256-u7zwcuV9L60rdhTHu6Hj0mmKnC0RHvwPKO6FBDE9sM8=";
     };
 
-    cargoHash = "sha256-ujwqV0LSHxW9lWigHr7B6CeSL3PAVWgc2g4ZggNpHJg=";
+    cargoHash = "sha256-bJzr4CTSIqpSjZVzGdPWtMLa+l8ICygA05Bnj0VwpEk=";
 
     patches = [ ];
 
