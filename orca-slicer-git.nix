@@ -53,13 +53,13 @@ in
       pname = "orca-slicer-git";
       # Версия из version.inc (SoftFever_VERSION), git-суффикс пинится здесь:
       # find_package(Git) в main больше не используется.
-      version = "2.5.0-dev-unstable-2026-10-29";
+      version = "2.6.0-dev-unstable-2026-11-18";
     
       src = super.fetchFromGitHub {
         owner = "OrcaSlicer";
         repo = "OrcaSlicer";
-        rev = "3911c9a56e494114b0e59adc79af83cf248e12f6";
-        hash = "sha256-sXWiWzl6Zk6rYzyFarp9MCWhT2ZVk4ZrdjF3Ax9D2IE=";
+        rev = "3838002bc8ba58f4f460749af40fa6fd8a89ffc7";
+        hash = "sha256-AaBh9nxOdK1c2E+l8slRUTeP0ry/pDphmEv7LTN62MQ=";
       };
     
       __structuredAttrs = true;
@@ -88,7 +88,12 @@ in
         super.dbus
         super.draco
         super.eigen_5
-        super.expat
+        # expat >= 2.10.0 (CVE-2026-115506 и ещё 3 CVE, PR upstream #17290);
+        # в пиннованном nixpkgs — 2.9.0, берём expat_2_10 из этого оверлея.
+        # Именно self, не super: nixpkgs composing foldr'ом, super содержит
+        # только оверлеи, идущие в списке ПОЗДЕ этого файла по алфавиту,
+        # а expat_2_10 (e) раньше orca-slicer-git (o).
+        self.expat_2_10
         super.ffmpeg
         super.glew
         super.glfw
@@ -157,6 +162,9 @@ in
         # оставляя нижнюю границу 3.12.x.
         substituteInPlace CMakeLists.txt \
           --replace-fail ' EXACT REQUIRED' ' REQUIRED'
+
+        # find_package(EXPAT 2.10.0 REQUIRED) (upstream PR #17290) не трогаем:
+        # floor выполняет expat_2_10 из buildInputs (см. expat_2_10.nix).
     
         # set(OpenCASCADE_DIR "''${CMAKE_PREFIX_PATH}/lib/cmake/occt") указывает на
         # deps-супербилд, а в nixpkgs конфиг OCCT лежит в lib/cmake/opencascade.
@@ -190,6 +198,13 @@ in
         (lib.cmakeBool "ORCA_VERSION_CHECK_DEFAULT" false)
         (lib.cmakeFeature "LIBNOISE_INCLUDE_DIR" "${super.libnoise}/include")
         (lib.cmakeFeature "LIBNOISE_LIBRARY_RELEASE" "${super.libnoise}/lib/libnoise-static.a")
+        # FindEXPAT иначе находит transitive expat 2.9.0 (fontconfig и пр.
+        # заносят его в NIXPKGS_CMAKE_PREFIX_PATH раньше) и спотыкается
+        # о floor 2.10.0. Указываем cache-пути напрямую; бинар expat_2_10
+        # собран с -fPIC, так что статический .a линкуется в PIE корректно —
+        # XML-парсер Orca получает 2.10.0 в себе, а не рантайм-резолв в 2.9.
+        (lib.cmakeFeature "EXPAT_INCLUDE_DIR" "${self.expat_2_10}/include")
+        (lib.cmakeFeature "EXPAT_LIBRARY" "${self.expat_2_10}/lib/libexpat.a")
         # uv: configure иначе качает закреплённый бинарник file(DOWNLOAD ...),
         # что в sandbox недоступно.
         (lib.cmakeFeature "ORCA_BUNDLED_UV_EXECUTABLE" "${super.uv}/bin/uv")
