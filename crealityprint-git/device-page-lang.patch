@@ -1,0 +1,28 @@
+--- a/src/slic3r/GUI/print_manage/App/PrinterMgrView.cpp
++++ b/src/slic3r/GUI/print_manage/App/PrinterMgrView.cpp
+@@ -357,6 +357,25 @@
+     RegisterHandler("set_user_custom_color_list", [this](const nlohmann::json& json_data) {
+         this->handle_set_user_custom_color_list(json_data);
+     });
++
++    // Device page never got these two: the frontend asks for them on mount
++    // (window.wx.postMessage({command:"get_lang"} / "is_dark_theme")), but only
++    // SendToPrinter/SysRoutes handle them. Without get_lang vue-i18n keeps its
++    // default en_GB locale, so every device-page string (including the delete
++    // confirmation dialog) stays English regardless of the app language.
++    RegisterHandler("get_lang", [this](const nlohmann::json&) {
++        nlohmann::json commandJson;
++        commandJson["command"] = "get_lang";
++        commandJson["data"]    = wxGetApp().current_frontend_language_code().ToStdString();
++        run_script(wxString::Format("window.handleStudioCmd('%s');", commandJson.dump().c_str()).ToStdString());
++    });
++
++    RegisterHandler("is_dark_theme", [this](const nlohmann::json&) {
++        nlohmann::json commandJson;
++        commandJson["command"] = "is_dark_theme";
++        commandJson["data"]    = wxGetApp().dark_mode();
++        run_script(wxString::Format("window.handleStudioCmd('%s');", commandJson.dump().c_str()).ToStdString());
++    });
+     std::string version = std::string(CREALITYPRINT_VERSION);
+     std::string os = wxGetOsDescription().ToStdString();
+     std::string type = std::string(PROJECT_VERSION_EXTRA);

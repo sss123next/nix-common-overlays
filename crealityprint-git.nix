@@ -150,19 +150,19 @@ let
     };
   });
 
-  # Ресурсы из официального релизного AppImage 7.3.0.6157.
+  # Ресурсы из официального релизного AppImage 7.3.2.6412.
   #
-  # Публичный тег v7.3.0 отстаёт от внутренней ветки, из которой собраны
-  # релизные бинарники: в AppImage лежат более свежие profiles/ (новые принтеры
-  # Creality mBox и SPARKX i8, ~500 обновлённых пресетов, нормализован регистр
-  # имён файлов — на Linux часть профилей не находилась) и пересобранный web/
-  # (другие бандлы/CSS). C++ при этом тот же: .mo переводов из AppImage
-  # байт-в-байт совпадают с генерируемыми из localization/i18n тега.
+  # Публичный тег отстаёт от внутренней ветки, из которой собраны релизные
+  # бинарники: в AppImage лежат более свежие profiles/ (новые принтеры,
+  # нормализован регистр имён файлов — на Linux часть профилей не находилась) и
+  # пересобранный web/ (другие бандлы/CSS). C++ при этом тот же: .mo переводов
+  # из AppImage байт-в-байт совпадали с генерируемыми из localization/i18n
+  # тега — для 7.3.2 не проверялось, но переводы мы всё равно генерим сами.
   #
   # Берём только profiles/ и web/; i18n собирается из .po в postPatch.
   releaseResources = super.stdenv.mkDerivation {
     pname = "crealityprint-release-resources";
-    version = "7.3.0.6157";
+    version = "7.3.2.6412";
 
     nativeBuildInputs = [
       super.cacert
@@ -174,14 +174,14 @@ let
     # FOD: скачиваем AppImage и распаковываем дописанный squashfs-образ.
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-qcfGs12x9XAvb86donG1rBNDesg9anzwYux1Tn4JkcY=";
+    outputHash = "sha256-hpAz1nVGdp0uLOIJC1Xi0iIlXF/lSQLJfQtmTjK7Oso=";
 
     buildCommand = ''
       set -eu
       export SSL_CERT_FILE=${super.cacert}/etc/ssl/certs/ca-bundle.crt
 
       curl -sSL -o app.AppImage \
-        "https://github.com/CrealityOfficial/CrealityPrint/releases/download/v7.3.0/CrealityPrint-V7.3.0.6157-x86_64-Release.AppImage"
+        "https://github.com/CrealityOfficial/CrealityPrint/releases/download/v7.3.2/CrealityPrint-V7.3.2.6412-x86_64-Release.AppImage"
 
       # Суперблок squashfs дописан к ELF-рантайму AppImage: перебираем все
       # вхождения магии «hsqs», валидным окажется одно.
@@ -204,7 +204,7 @@ let
     '';
 
     meta = {
-      description = "CrealityPrint 7.3.0.6157 release assets (printer profiles, web UI)";
+      description = "CrealityPrint 7.3.2.6412 release assets (printer profiles, web UI)";
       license = lib.licenses.agpl3Only;
       platforms = lib.platforms.linux;
     };
@@ -217,14 +217,14 @@ in
 
   crealityprint-git = clangStdenv.mkDerivation (finalAttrs: {
     pname = "crealityprint-git";
-    # rev ниже = тег v7.3.0 (7.3.0.6157 — номер сборки из релизных артефактов).
-    version = "7.3.0";
+    # rev ниже = тег v7.3.2 (7.3.2.6412 — номер сборки из релизных артефактов).
+    version = "7.3.2";
 
     src = super.fetchFromGitHub {
       owner = "CrealityOfficial";
       repo = "CrealityPrint";
-      rev = "59ae8cbb0437dcc7236e27433ecd4aeb52be0244";
-      hash = "sha256-JqclLOgjnku5zDXuKFOUhPyz1li3Zd6xSQm5UcfJy6I=";
+      rev = "6262848e302b8c0d593f2b341cd01310aa2f58a1";
+      hash = "sha256-TmkrNBRITBtUqI5DtCIMJUmAMfjoGE2KqX7IpuTgakE=";
       fetchSubmodules = false;
     };
 
@@ -300,9 +300,10 @@ in
       # OpenVDB: убираем поиск IlmBase (в nixpkgs он часть OpenEXR/Imath)
       ./orca-slicer-git/no-ilmbase.patch
       # Device-page (print_manage) frontend asks C++ for get_lang/is_dark_theme
-      # on mount, but PrinterMgrView never answered → vue-i18n stayed en_GB.
-      # Плюс диагностика ws-proxy: без неё «молчащее» удаление не отладить.
-      ./crealityprint-git/device-page-lang-and-wsproxy-debug.patch
+      # on mount, but PrinterMgrView registers neither — only SendToPrinter and
+      # SysRoutes do. Без get_lang vue-i18n остаётся на en_GB, и вся страница
+      # устройств (включая диалог удаления) говорит по-английски.
+      ./crealityprint-git/device-page-lang.patch
       # HTTP-сервер слушает только 127.0.0.1, а GuideFrame грузил
       # http://localhost:<port>/ — на машинах, где localhost уходит в ::1,
       # страница мастера не загружалась вовсе (пустое окно).
@@ -397,12 +398,20 @@ endif()' \
       cp -rf ${releaseResources}/profiles/. resources/profiles/
       cp -rf ${releaseResources}/web/. resources/web/
 
-      # Диагностика device-страницы: JS-ошибки и обмен с ws-proxy уходят в
-      # C++ (frontend_log → лог приложения). Временно, до разбора «молчащего»
-      # удаления из истории.
-      cat ${./crealityprint-git/device-page-diagnostics.html} >> resources/web/deviceMgr/index.html
-      # Обход гонки: запрос истории уходит до того, как появился printer-клиент,
-      # и больше не повторяется — см. комментарий в файле.
+      # В теге v7.3.2 из resources/printers/ пропал version.txt (остальное
+      # содержимое каталога в релизном AppImage совпадает с тегом байт-в-байт,
+      # файл генерируется их пайплайном). Без него PresetUpdater::priv::
+      # get_printer_config_updates() присваивает пустую строку в
+      # Version::config_version (Semver), а Semver(const std::string&) на
+      # неразбираемом значении бросает RuntimeError → terminate() до появления
+      # окна: «Could not parse version string: ». Значение — то же, что в
+      # AppImage 7.3.2.6412 и в теге v7.3.0.
+      printf '01.08.03.01' > resources/printers/version.txt
+
+      # Device-страница: 1) reqHistory уходит один раз в onMounted, пока принтер
+      # ещё не обзавёлся сокетом; 2) после deleteHistory список не перезапраши-
+      # вается. Докидываем перезапросы, перехватив WebSocket страницы (в 7.3.2
+      # она открывает сокет сама, ws_proxy ей не нужен) — см. комментарий в файле.
       cat ${./crealityprint-git/device-page-request-history.html} >> resources/web/deviceMgr/index.html
 
       # --- переводы, как ./run_gettext.sh в официальной сборке ---
@@ -419,7 +428,7 @@ endif()' \
     cmakeFlags = [
       # version.inc задаёт CREALITYPRINT_VERSION=7.0.0.0 по умолчанию (реальную
       # версию туда пишет их build-скрипт), из-за чего About показывал 7.0.0.
-      (lib.cmakeFeature "CREALITYPRINT_VERSION" "7.3.0.6157")
+      (lib.cmakeFeature "CREALITYPRINT_VERSION" "7.3.2.6412")
       # Иначе version.inc ставит "Beta": SHIPPING_LEVEL=1, суффикс "Beta" в
       # About и α-dev ветки в CXCloud/CxAgent. Официальные сборки — Release.
       (lib.cmakeFeature "PROJECT_VERSION_EXTRA" "Release")

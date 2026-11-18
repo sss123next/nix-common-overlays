@@ -1,86 +1,87 @@
 <script>
 /*
- * Обход гонки на device-странице: компонент истории посылает принтеру
- *   {method:"get",params:{reqHistory:1}}
- * ровно один раз — в onMounted, под проверкой
- *   dataCenter.getPrinter(addr) != null && .socket
- * Но dataCenter наполняется из ответа C++ на get_machine_list, который приходит
- * уже после монтирования. На первом заходе проверка не проходит, запрос не
- * уходит и повтора нет — история пуста до повторного входа на страницу.
+ * Device-страница в 7.3.2 открывает сокет принтера сама (`new WebSocket` прямо
+ * в бандле; ws_proxy из 7.3.0 ей больше не нужен), но обе болячки остались:
  *
- * Здесь тот же кадр отправляется через ws-proxy сразу после того, как сессия
- * открылась (ProxyWebSocket шлёт {type:"open"} со своим id/socketToken).
+ *  1. Кадр {method:"get",params:{reqHistory:1}} отправляется ровно один раз —
+ *     в onMounted и под проверкой dataCenter.getPrinter(addr) && .socket. Сокет
+ *     назначает ответ на get_machine_list/probe_lan_device, то есть уже после
+ *     монтирования: на первом заходе проверка не проходит, запрос не уходит,
+ *     повтора нет — история пуста до повторного входа на страницу.
+ *  2. Удаление записи: страница шлёт {params:{deleteHistory:[...]}} и только
+ *     чистит выбор, список обновится лишь когда принтер сам пришлёт historyList.
  *
- * Второй сценарий — удаление записи: страница шлёт {params:{deleteHistory:[...]}}
- * и очищает выбор, а обновлённый список появляется только когда принтер сам
- * пришлёт historyList. Перезапрашиваем историю через 1.2/3/6 с, чтобы список
- * обновлялся сразу после удаления.
+ * Перехват WebSocket.prototype.send + обёртка конструктора: наш инлайн-скрипт
+ * вставляется в конец <body> и выполняется раньше defer-бандла страницы, так что
+ * успевает заменить WebSocket до её кода. Формат кадра не выдумываем — после
+ * удаления переуотправляем тот же reqHistory, что страница уже отправляла этим
+ * сокетом (fallback нужен только для первого захода).
+ *
+ * Post-open запрос уходит только на ws:// с LAN-адресом (принтер), чтобы не
+ * слать мусор облачным wss://-сокетам этой же страницы, и только если страница
+ * за это время сама ничего не запросила.
  */
 (function () {
-  var tries = 0;
-  var lastSession = null;
+  if (window.__cpHistoryFix || typeof WebSocket === "undefined") return;
+  window.__cpHistoryFix = 1;
 
-  function install() {
-    var bridge = window.wx;
-    if (!bridge || !bridge.postMessage) {
-      if (++tries < 50) setTimeout(install, 200);
-      return;
-    }
-    if (bridge.__cpReqHistory) return;
-    bridge.__cpReqHistory = true;
+  var Orig = WebSocket;
+  var origSend = Orig.prototype.send;
+  var seen = [];   // сокеты, на которых страница сама просила историю
+  var lastFrame = null;
 
-    var post = bridge.postMessage;
-
-    function requestHistory(session) {
-      if (!session) return;
-      try {
-        // pageToken обязателен и должен лежать внутри payload — иначе
-        // parse_proxy_command() в C++ отбросит команду.
-        post.call(bridge, JSON.stringify({
-          command: "ws_proxy",
-          payload: {
-            type: "send",
-            pageToken: session.pageToken,
-            id: session.id,
-            socketToken: session.socketToken,
-            data: JSON.stringify({ method: "get", params: { reqHistory: 1 } })
-          }
-        }));
-      } catch (e) {}
-    }
-
-    bridge.postMessage = function (payload) {
-      try {
-        var text = String(payload);
-        if (text.indexOf('"command":"ws_proxy"') !== -1) {
-          var msg = JSON.parse(text);
-          var p = msg && msg.payload;
-          if (p && p.type === "open" && p.socketToken && p.pageToken) {
-            lastSession = {
-              id: p.id,
-              socketToken: p.socketToken,
-              pageToken: p.pageToken
-            };
-            setTimeout(function () { requestHistory(lastSession); }, 300);
-            setTimeout(function () { requestHistory(lastSession); }, 2000);
-          } else if (p && p.type === "send" && typeof p.data === "string" &&
-                     p.data.indexOf('"deleteHistory"') !== -1) {
-            var session = {
-              id: p.id,
-              socketToken: p.socketToken,
-              pageToken: p.pageToken
-            };
-            lastSession = session;
-            setTimeout(function () { requestHistory(session); }, 1200);
-            setTimeout(function () { requestHistory(session); }, 3000);
-            setTimeout(function () { requestHistory(session); }, 6000);
-          }
-        }
-      } catch (e) {}
-      return post.apply(bridge, arguments);
-    };
+  function is_lan_socket(url) {
+    var m = /^wss?:\/\/([^/:]+)/i.exec(String(url || ""));
+    if (!m) return false;
+    var h = m[1];
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(h))
+      return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.)/.test(h);
+    return false;   // облачные сокет-хосты — имена, их не трогаем
   }
 
-  install();
+  function history_frame() {
+    return lastFrame || JSON.stringify({ method: "get", params: { reqHistory: 1 } });
+  }
+
+  function ask(sock) {
+    try {
+      if (sock && sock.readyState === 1) origSend.call(sock, history_frame());
+    } catch (e) {}
+  }
+
+  Orig.prototype.send = function (data) {
+    try {
+      var text = String(data);
+      if (text.indexOf('"reqHistory"') !== -1) {
+        if (seen.indexOf(this) === -1) seen.push(this);
+        lastFrame = text;
+      } else if (text.indexOf('"deleteHistory"') !== -1) {
+        var sock = this;
+        [1200, 3000, 6000].forEach(function (delay) {
+          setTimeout(function () { ask(sock); }, delay);
+        });
+      }
+    } catch (e) {}
+    return origSend.apply(this, arguments);
+  };
+
+  function Wrapped(url, protocols) {
+    var sock = protocols === undefined ? new Orig(url) : new Orig(url, protocols);
+    try {
+      if (is_lan_socket(url)) {
+        sock.addEventListener("open", function () {
+          setTimeout(function () {
+            if (seen.indexOf(sock) === -1) ask(sock);
+          }, 2500);
+        });
+      }
+    } catch (e) {}
+    return sock;
+  }
+  Wrapped.prototype = Orig.prototype;
+  ["CONNECTING", "OPEN", "CLOSING", "CLOSED"].forEach(function (k) {
+    Wrapped[k] = Orig[k];
+  });
+  window.WebSocket = Wrapped;
 })();
 </script>
