@@ -9,13 +9,13 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: {
       pname = "kun";
-      version = "0.4.1";
+      version = "0.4.5";
 
       src = fetchFromGitHub {
         owner = "KunAgent";
         repo = "Kun";
-        rev = "v0.4.1";
-        hash = "sha256-LC1FrpnhhVYLgcY2w6dbOFyeUt2FVY1pTl1EkmD8dfs=";
+        rev = "v0.4.5";
+        hash = "sha256-tLAp9p8+4qOiG/hGDAxpNLnhNSvJ4HRrU/Hun9Sj8yY=";
       };
 
       # Two separate lockfiles — root (kun-gui workspaces) and kun/ subtree (CLI).
@@ -61,7 +61,7 @@ self: super: {
 
           dontInstall = true;
           outputHashMode = "recursive";
-          hash = "sha256-zYzypxWGZJsP61ymKM35uIK+MQ7ILJnkUwbfmzqfa5c=";
+          hash = "sha256-1KDgf9c0xx3vktRkWuJ6zqxSLog+Ceo2zBnYr77Ku9E=";
         }
       );
 
@@ -82,20 +82,28 @@ self: super: {
         npmHooks.npmConfigHook
       ];
 
-      # Both workarounds below are still required on 0.4.1 — verified by building
-      # without them and running offline `npm ci` against the prefetched cache:
+      # Both workarounds are still required on 0.4.5. Re-verified offline against
+      # the prefetched npmDeps cache rather than carried over — that is how the
+      # wrong attribution in this comment got fixed:
       #
-      #  * --legacy-peer-deps — the root install passes cleanly without it (all
-      #    1762 packages, rxjs included), but npmConfigHook installs both lockfiles
-      #    in one pass and the kun/ subtree then dies with EUSAGE: "Invalid: lock
-      #    file's @radix-ui/react-* does not satisfy ..." + "Missing: ... from lock
-      #    file" (@excalidraw/excalidraw pins old @radix-ui/* against the hoisted
-      #    tree). Online npm can re-resolve; offline it cannot.
+      #  * --legacy-peer-deps — the ROOT `npm ci` dies with EUSAGE without it:
+      #    "Invalid: lock file's @radix-ui/react-popover@1.1.23 does not satisfy
+      #    @radix-ui/react-popover@1.1.6" (plus primitive, react-compose-refs, …),
+      #    because @excalidraw/excalidraw pins older @radix-ui/* than the hoisted
+      #    tree. Online npm re-resolves; offline it cannot. The kun/ subtree is
+      #    NOT the offender — it installs fine without the flag; the 0.4.1
+      #    revision of this comment claimed the opposite.
       #
-      #  * rxjs in dependencies — --legacy-peer-deps makes npm skip every peer:true
-      #    lockfile entry, and rxjs (a peer of @univerjs/core) is one of them, so
-      #    electron-vite dies with "Rollup failed to resolve import rxjs". Promoting
-      #    it to a direct dependency installs it; node_modules ships in $out.
+      #  * rxjs in dependencies — the price of that flag: npm then skips every
+      #    peer:true lockfile entry, so node_modules/rxjs is missing even though
+      #    @univerjs/core declares peerDependencies.rxjs ">=7.0.0", and
+      #    electron-vite dies with "Rollup failed to resolve import rxjs".
+      #    Measured on 0.4.5: install with the flag is green, rxjs absent.
+      #    Promoting it to a direct dependency installs it; node_modules ships
+      #    in $out, so runtime resolves it.
+      #
+      # Only package.json is touched here; package-lock.json stays byte-identical
+      # so npmConfigHook's consistency check against $npmDeps still passes.
       postPatch = ''
         node -e '
           const fs = require("fs");
@@ -187,18 +195,29 @@ self: super: {
         mkdir -p "$out/share/kun/out/main/out"
         cp -r "$out/share/kun/out/preload" "$out/share/kun/out/main/out/preload"
 
-        # Same anchoring applies to bundled assets: <appPath>/resources/...
-        # (bundled-skill-resources.ts, bundled-extension-resources.ts). Only the
-        # JS-side trees are copied — resources/whisper alone is 25 MiB of
-        # prebuilt multi-platform binaries that would need patchelf, and that
-        # feature is optional and degrades to "not installed" when absent.
+        # Same anchoring applies to bundled assets. All of these lookups branch
+        # on app.isPackaged (bundled-skill-resources.ts, pet-importer.ts,
+        # officecli-resources.ts): packaged builds use process.resourcesPath,
+        # ours — Electron is handed out/main as a directory — are unpackaged and
+        # read <appPath>/resources/<name>, i.e. out/main/resources.
+        #
+        #   bundled-skills  skills shipped with the app
+        #   pets            desktop companions (0.4.5): pet.json + webp sheets
+        #   officecli       license/provenance stub only, the binary itself is
+        #                   downloaded on demand into userData
+        #   ppt-toolchain   Python helpers for PPT/PPTX export
+        #
+        # resources/bundled-extensions existed through 0.4.1 and is gone upstream
+        # now, though the JS still names it — hence the -d guard per directory.
+        # resources/whisper is deliberately skipped: 25 MiB of prebuilt
+        # multi-platform binaries that would need patchelf, and the feature
+        # degrades to "not installed" when absent.
         mkdir -p "$out/share/kun/out/main/resources"
-        if [ -d resources/bundled-skills ]; then
-          cp -r resources/bundled-skills "$out/share/kun/out/main/resources/"
-        fi
-        if [ -d resources/bundled-extensions ]; then
-          cp -r resources/bundled-extensions "$out/share/kun/out/main/resources/"
-        fi
+        for res in bundled-skills pets officecli ppt-toolchain; do
+          if [ -d "resources/$res" ]; then
+            cp -r "resources/$res" "$out/share/kun/out/main/resources/"
+          fi
+        done
 
         # electron-updater validates app.getVersion() as semver at startup;
         # "0.0" → ERR_UPDATER_INVALID_VERSION. With FILE launch Electron
