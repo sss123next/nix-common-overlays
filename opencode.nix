@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-16mdK+qKJ9n6MlyEMX82gzmDpCdP4qQXGL5ijtpV5wM=";
+            "x86_64-linux"   = "sha256-ieIVBRyQvhdOXZdkKIbyCSKA9tU1X9sNPkTjtTiubgo=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -115,7 +115,7 @@ self: super: {
         # session/runner/retry.ts into core/src/model-retry.ts; rebased there, applies at offset 0.
         ./patches/opencode-retry-attempts.patch
         # Web GUI: stop generation on Ctrl+G only. Bare Escape still closes popovers and
-        # cancels queue editing, but no longer aborts a running turn (interaction.ts). Offset 0.
+        # cancels queue editing, but no longer aborts a running turn (model.ts keymap command prompt.stop). Offset 0.
         ./patches/opencode-esc-no-interrupt.patch
         # Add "Allow always (session)" option to permission dialogs. New literal "always_session"
         # in Permission.Reply; when chosen with checkbox "Only for this session" active, rules
