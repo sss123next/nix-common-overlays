@@ -31,18 +31,18 @@ self: super: {
     in
     rustPlatform.buildRustPackage {
       pname = "ferrite";
-      version = "0.3.0";
+      version = "0.3.1";
 
       src = fetchFromGitHub {
         owner = "OlaProeis";
         repo = "Ferrite";
-        rev = "0.3.1-experimental";
-        hash = "sha256-tVqbrBjXCUpL8OKbt/Aa39h9J0x84YkE5DH3bp50idc=";
+        rev = "0.3.2-experimental";
+        hash = "sha256-ZZmS5LwE71WWeLUJ8efIfqaSoTLRGh+B6jQ1MVZ78f8=";
       };
 
       cargoLock.lockFile = fetchurl {
-        url = "https://raw.githubusercontent.com/OlaProeis/Ferrite/0.3.1-experimental/Cargo.lock";
-        hash = "sha256-xos9PvKvsLOdktuLXnwLEE8Jp2YdV/vtlGsJKlAi+Is=";
+        url = "https://raw.githubusercontent.com/OlaProeis/Ferrite/0.3.2-experimental/Cargo.lock";
+        hash = "sha256-yFmTS9QcWSMuxy8G39MJOC532EhAj1f4W6QMcmgICkY=";
       };
 
       nativeBuildInputs = [ pkg-config makeWrapper ]
