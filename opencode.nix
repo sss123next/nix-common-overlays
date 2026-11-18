@@ -100,9 +100,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "46aefe3da30553099a8b8434d65aff1029a03235";
+        rev = "521ceac004e59fbbfca0929596107cd8430f2b26";
 #        ref = "production";
-        hash = "sha256-/Cc/eb3npKKUEUVM9sgjJtE67yrRWLDL2pwxBA2WPi0=";
+        hash = "sha256-YsLV3wWmVI0M4IuRVulBY/Khf6FOzsEF25EbjZucpQ4=";
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
