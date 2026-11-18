@@ -2,11 +2,11 @@
 self: super: {
   sillytavern = with super;
     let
-      version = "2026-10-03";
+      version = "2026-11-15";
       src = fetchGit {
         url = "https://github.com/SillyTavern/SillyTavern";
         ref = "staging";
-        rev = "ad29cbda62e92f145e44d7a10398a38af22ca986";
+        rev = "0a85854ee38a8e0123564933713ef773df10975b";
       };
 
       # MCP-плагины: пребилт-директория (собраны webpack'ом, сохранены в репо)
@@ -16,7 +16,7 @@ self: super: {
       pname = "sillytavern";
       inherit version src;
 
-      npmDepsHash = "sha256-wAVmQuchjDXh7sTj8Q7+bJJoYCi7JdvlEeC5G9VtjMU=";
+      npmDepsHash = "sha256-2TC0leW52d5zT1KHDfiAoXiyPi8lQMTlF68F1BQ23ms=";
 
       nativeBuildInputs = [ makeBinaryWrapper ];
 

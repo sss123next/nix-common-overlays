@@ -1,4 +1,4 @@
-From f1e2175f90bbe11be45767c03d78ff306e1637cf Mon Sep 17 00:00:00 2001
+From bf110f44d14acbfd4b4be257379b8a7588e9b098 Mon Sep 17 00:00:00 2001
 From: sss <sss@dark-alexandr.net>
 Date: Wed, 22 Jul 2026 16:48:14 +0300
 Subject: [PATCH 1/2] use ctrl+sec instead of esc to stop generation
@@ -35,10 +35,10 @@ index 569ca5a92..08be0d0ff 100644
      <li><kbd data-i18n="help_hotkeys_19">Ctrl+Shift+Down</kbd> = <span data-i18n="help_hotkeys_20">Scroll chat to bottom</span></li>
  </ul>
 -- 
-2.55.0
+2.56.0
 
 
-From 093c70521eeede4669390c9ce66163b4dd7a420e Mon Sep 17 00:00:00 2001
+From c0ba7da65c04ea73ecad3856a9afc8595cd64e28 Mon Sep 17 00:00:00 2001
 From: sss <sss@dark-alexandr.net>
 Date: Thu, 24 Sep 2026 00:23:02 +0300
 Subject: [PATCH 2/2] Remap generation stop from Escape to Ctrl+Escape
@@ -116,10 +116,10 @@ index 242dc7270..f086dfccd 100644
      "help_hotkeys_17": "Ctrl+Shift+↑",
      "help_hotkeys_18": "滾動到上下文行",
 diff --git a/public/script.js b/public/script.js
-index 5a73f7e78..f665904fe 100644
+index f80f68189..910d714be 100644
 --- a/public/script.js
 +++ b/public/script.js
-@@ -12329,24 +12329,23 @@ jQuery(async function () {
+@@ -12368,24 +12368,23 @@ jQuery(async function () {
          if (e.key === 'Escape' && !e.originalEvent.isComposing) {
              const isEditVisible = $('#curEditTextarea').is(':visible') || $('.reasoning_edit_textarea').length > 0;
              if (isEditVisible && power_user.auto_save_msg_edits === false) {
@@ -200,5 +200,5 @@ index 2e83e06e0..67149be66 100644
  
  
 -- 
-2.55.0
+2.56.0
 
