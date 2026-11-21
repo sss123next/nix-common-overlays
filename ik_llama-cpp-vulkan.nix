@@ -7,15 +7,15 @@ self: super: {
       let
         # Пин апстрима: релизных тегов у ik_llama.cpp нет (только стаб t0002),
         # см. research/nix-overlays/git-version-packaging.
-        srcRev = "06a141f3bdb59a634ed2021760446522e2e8fe9d";
+        srcRev = "7c00f8788e303bfba2886138e288effb0fd5fbbf";
         # Реквизиты для build-info (в tarball'е .git нет → git-ветка не сработает):
-        # 5276 = rev-list --count main на момент пина srcRev.
-        buildNumber = "5276";
-        buildCommit = "06a141f3";
+        # 5284 = rev-list --count main на момент пина srcRev.
+        buildNumber = "5284";
+        buildCommit = "7c00f878";
       in
       {
         pname = "ik_llama-cpp-vulkan";
-        version = "unstable-2026-11-19";
+        version = "unstable-2026-11-21";
 
         # fetchGit с ref без rev невозможен в pure-mode (flake eval падает:
         # "in pure evaluation mode, 'fetchGit' doesn't fetch unlocked input"),
@@ -24,7 +24,7 @@ self: super: {
           owner = "ikawrakow";
           repo = "ik_llama.cpp";
           rev = srcRev;
-          hash = "sha256-iLfRRIZNsmxry7VM34V/P95a8mxNNpnk+TfXQeiVJ74=";
+          hash = "sha256-41QE72MHXzb8gTIZYa3QFOBJPVvvou/zuhYexZTLLys=";
         };
 
         # --print-stats / --no-print-stats / --stats-interval N: тонкий вывод
