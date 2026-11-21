@@ -1,0 +1,304 @@
+diff --git a/examples/mtmd/clip-impl.h b/examples/mtmd/clip-impl.h
+index 69999ad9..4b4843bb 100644
+--- a/examples/mtmd/clip-impl.h
++++ b/examples/mtmd/clip-impl.h
+@@ -165,6 +165,11 @@ static inline dsv4_block_layout dsv4_get_block_layout(int n_llm_w, int n_llm_h,
+     return bl;
+ }
+ 
++// deepseek41v: [START] ([IMAGE]*n_llm_w [NEWLINE])*n_llm_h [END], ref: num_image_tokens() in image_processor.py
++static inline int dsv41_n_block_tokens(int n_llm_w, int n_llm_h) {
++    return n_llm_h * (n_llm_w + 1) + 2;
++}
++
+ enum projector_type {
+     PROJECTOR_TYPE_MLP,
+     PROJECTOR_TYPE_MLP_NORM,
+@@ -198,6 +203,7 @@ enum projector_type {
+     PROJECTOR_TYPE_MINIMAX_M3_VL,
+     PROJECTOR_TYPE_DEEPSEEK4V,
+     PROJECTOR_TYPE_DEEPSEEK41,
++    PROJECTOR_TYPE_DEEPSEEK41V,
+     PROJECTOR_TYPE_GLM4V,
+     PROJECTOR_TYPE_UNKNOWN,
+ 
+@@ -235,6 +241,7 @@ static std::map<projector_type, std::string> PROJECTOR_TYPE_NAMES = {
+     { PROJECTOR_TYPE_MINIMAX_M3_VL, "minimax_m3_vl"},
+     { PROJECTOR_TYPE_DEEPSEEK4V, "deepseek4v"},
+     { PROJECTOR_TYPE_DEEPSEEK41, "deepseek41"},
++    { PROJECTOR_TYPE_DEEPSEEK41V,"deepseek41v"},
+     { PROJECTOR_TYPE_GLM4V,      "glm4v"},
+ };
+ 
+diff --git a/examples/mtmd/clip.cpp b/examples/mtmd/clip.cpp
+index c7b95e55..8fd4ce4d 100644
+--- a/examples/mtmd/clip.cpp
++++ b/examples/mtmd/clip.cpp
+@@ -768,15 +768,18 @@ struct clip_graph {
+         return gf;
+     }
+ 
+-    // DeepSeek-V4-Flash-Vision encoder (deepseek4v)
++    // DeepSeek-V4-Flash-Vision encoder (deepseek4v / deepseek41v)
+     //
+     // native-resolution ViT (RMSNorm, SwiGLU, 2D RoPE, no CLS / learned pos-embd)
+     // then the "aligner": n_merge x n_merge patch merge (F.unfold == im2col) + 2-layer GELU MLP.
+-    // the graph emits the full LLM token block: aligner output interleaved (N-layout) with
+-    // 4 learned sentinels, reordered by a precomputed CPU layout_idx input:
+-    //   [PAD]*lead_pad [START] <rows> [PAD]*pad_last [END]
++    // the graph emits the full LLM token block: aligner output interleaved with learned sentinels,
++    // reordered by a precomputed CPU layout_idx input.
++    //
++    // deepseek4v:   [PAD]*lead_pad [START] <rows> [PAD]*pad_last [END]  (4 sentinels)
++    // deepseek41v:  [START] ([IMAGE]*n_llm_w [NEWLINE])*n_llm_h [END]    (3 sentinels, no pad)
+     // ref: inference/vision.py, inference/image_processor.py in the HF repo
+     ggml_cgraph * build_deepseek4v() {
++        const bool is_v41 = ctx->proj_type() == PROJECTOR_TYPE_DEEPSEEK41V;
+         const int n_merge = hparams.n_merge;
+ 
+         // 2D input positions (mrope layout, only the first 2 channels are used)
+@@ -833,19 +836,24 @@ struct clip_graph {
+             const int64_t n_grid     = cur->ne[1]; // n_llm_w * n_llm_h
+ 
+             // rows n_grid + 0..3, keep in sync with the index computation in clip_image_batch_encode
++            // deepseek41v has no token_embd_img_pad
+             ggml_tensor * sentinels[] = {
+                 model.token_embd_img_start,
+                 model.token_embd_img_end,
+                 model.image_newline,
+-                model.token_embd_img_pad,
++                is_v41 ? nullptr : model.token_embd_img_pad,
+             };
+             for (ggml_tensor * tok : sentinels) {
+-                cur = ggml_concat(ctx0, cur, ggml_reshape_2d(ctx0, tok, n_embd_out, 1), 1);
++                if (tok) {
++                    cur = ggml_concat(ctx0, cur, ggml_reshape_2d(ctx0, tok, n_embd_out, 1), 1);
++                }
+             }
+ 
+             const int n_llm_w = CLIP_ALIGN(n_patches_x, n_merge) / n_merge;
+             const int n_llm_h = CLIP_ALIGN(n_patches_y, n_merge) / n_merge;
+-            const int n_out   = dsv4_get_block_layout(n_llm_w, n_llm_h, img.lead_pad).n_out;
++            const int n_out   = is_v41
++                ? dsv41_n_block_tokens(n_llm_w, n_llm_h)
++                : dsv4_get_block_layout(n_llm_w, n_llm_h, img.lead_pad).n_out;
+             GGML_ASSERT(n_grid == n_llm_w * n_llm_h);
+ 
+             ggml_tensor * layout_idx = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, n_out);
+@@ -3485,6 +3493,7 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
+                 res = graph.build_pixtral();
+             } break;
+         case PROJECTOR_TYPE_DEEPSEEK4V:
++        case PROJECTOR_TYPE_DEEPSEEK41V:
+             {
+                 res = graph.build_deepseek4v();
+             } break;
+@@ -3959,6 +3968,29 @@ struct clip_model_loader {
+                         const int warmup_side = (int) std::sqrt((double) std::min(256, hparams.dsv4_max_n_token));
+                         hparams.set_warmup_n_tokens(warmup_side * warmup_side);
+                     } break;
++                case PROJECTOR_TYPE_DEEPSEEK41V:
++                    {
++                        // ref: load_image in inference/image_processor.py (V4.1), PIL ImageOps.pad on gray 127
++                        hparams.rope_theta = 10000.0f;
++                        get_u32(KEY_PROJ_SCALE_FACTOR, hparams.n_merge);
++                        get_u32(KEY_IMAGE_MIN_PIXELS,  hparams.image_min_pixels);
++                        // vision_max_n_token = 1024, vision_max_wh_ratio = null (converter asserts both)
++                        hparams.dsv4_max_n_token  = 1024;
++                        hparams.dsv4_max_wh_ratio = 0;
++                        const int patch_area = hparams.patch_size * hparams.patch_size * hparams.n_merge * hparams.n_merge;
++                        if (hparams.custom_image_min_tokens > 0) {
++                            hparams.image_min_pixels = hparams.custom_image_min_tokens * patch_area;
++                        }
++                        if (hparams.custom_image_max_tokens > 0) {
++                            // the cap is on the whole token block (newlines + start/end included)
++                            hparams.dsv4_max_n_token = std::max(hparams.custom_image_max_tokens, 16);
++                        }
++                        hparams.image_max_pixels = hparams.dsv4_max_n_token * patch_area;
++                        hparams.image_min_pixels = std::min(hparams.image_min_pixels, hparams.image_max_pixels);
++                        // avoid OOM on warmup
++                        const int warmup_side = (int) std::sqrt((double) std::min(256, hparams.dsv4_max_n_token));
++                        hparams.set_warmup_n_tokens(warmup_side * warmup_side);
++                    } break;
+                 case PROJECTOR_TYPE_GEMMA3:
+                     {
+                         // default value (used by all model sizes in gemma 3 family)
+@@ -4574,6 +4606,7 @@ struct clip_model_loader {
+                 } break;
+             case PROJECTOR_TYPE_DEEPSEEK4V:
+             case PROJECTOR_TYPE_DEEPSEEK41:
++            case PROJECTOR_TYPE_DEEPSEEK41V:
+                 {
+                     model.mm_1_w = get_tensor(string_format(TN_LLAVA_PROJ, 1, "weight"));
+                     model.mm_1_b = get_tensor(string_format(TN_LLAVA_PROJ, 1, "bias"));
+@@ -5851,6 +5884,94 @@ bool clip_image_preprocess(struct clip_ctx * ctx, const clip_image_u8 * img, str
+                 res_imgs->entries.push_back(std::move(res));
+             } break;
+ 
++        case PROJECTOR_TYPE_DEEPSEEK41V:
++            {
++                // port of plan_image_grid / load_image from inference/image_processor.py (V4.1)
++                // differs from deepseek41: ImageOps.pad (contain + centered paste), round-half-even, bf16 rounding
++                const int p           = params.patch_size;
++                const int r           = params.n_merge;
++                const int max_n_token = params.dsv4_max_n_token;
++
++                auto n_tokens = [&](int bh, int bw) {
++                    const int n_llm_h = ((bh / p) + r - 1) / r;
++                    const int n_llm_w = ((bw / p) + r - 1) / r;
++                    return n_llm_h * (n_llm_w + 1) + 2;
++                };
++
++                int width  = original_size.width;
++                int height = original_size.height;
++                if (params.image_min_pixels > 0 && (int64_t) width * height > 0
++                        && (int64_t) width * height < params.image_min_pixels) {
++                    const double ratio = std::sqrt((double) params.image_min_pixels / ((double) width * (double) height));
++                    width  = (int) (width  * ratio);
++                    height = (int) (height * ratio);
++                }
++                int best_width  = CLIP_ALIGN(width,  p);
++                int best_height = CLIP_ALIGN(height, p);
++                if (n_tokens(best_height, best_width) > max_n_token) {
++                    // solve_resize_ratio: largest aspect-preserving size whose token block fits
++                    const double ratio   = (double) height / width;
++                    const double max_w_f = std::sqrt((double)(max_n_token - 2) / ratio + 0.25) - 0.5;
++                    const double max_h_f = max_w_f * ratio;
++                    const int    cell    = p * r;
++                    if (max_w_f < 1.0) {
++                        best_height = ((max_n_token - 2) / 2) * cell;
++                        best_width  = cell;
++                    } else if (max_h_f < 1.0) {
++                        best_height = cell;
++                        best_width  = (max_n_token - 3) * cell;
++                    } else {
++                        const double beta = std::min(
++                            std::floor(max_w_f) * cell / width,
++                            std::floor(max_h_f) * cell / height);
++                        best_height = (int) std::floor(height * beta / p) * p;
++                        best_width  = (int) std::floor(width  * beta / p) * p;
++                    }
++                    GGML_ASSERT(n_tokens(best_height, best_width) <= max_n_token);
++                }
++
++                // PIL ImageOps.pad(color=127): ImageOps.contain then a centered paste; python round is half to even
++                auto round_half_even = [](double x) { return (int) std::nearbyint(x); };
++                int new_w = best_width;
++                int new_h = best_height;
++                const double im_ratio   = (double) original_size.width / original_size.height;
++                const double dest_ratio = (double) best_width / best_height;
++                if (im_ratio != dest_ratio) {
++                    if (im_ratio > dest_ratio) {
++                        new_h = round_half_even((double) original_size.height / original_size.width * best_width);
++                    } else {
++                        new_w = round_half_even((double) original_size.width / original_size.height * best_height);
++                    }
++                }
++
++                clip_image_u8 resized;
++                img_tool::resize(*img, resized, {new_w, new_h}, img_tool::RESIZE_ALGO_BICUBIC, false);
++
++                clip_image_u8 padded;
++                if (new_w == best_width && new_h == best_height) {
++                    padded = std::move(resized);
++                } else {
++                    padded.nx = best_width;
++                    padded.ny = best_height;
++                    padded.buf.resize(3 * (size_t) best_width * (size_t) best_height);
++                    const std::array<uint8_t, 3> pad_color = {127, 127, 127};
++                    img_tool::fill(padded, pad_color);
++                    const int off_x = round_half_even((best_width  - new_w) * 0.5);
++                    const int off_y = round_half_even((best_height - new_h) * 0.5);
++                    img_tool::composite(padded, resized, off_x, off_y);
++                }
++
++                clip_image_f32_ptr res(clip_image_f32_init());
++                normalize_image_u8_to_f32(padded, *res, params.image_mean, params.image_std);
++
++                // load_image rounds the normalized input to bf16 (round to nearest even)
++                for (size_t i = 0; i < res->buf.size(); i++) {
++                    res->buf[i] = ggml_bf16_to_fp32(ggml_fp32_to_bf16(res->buf[i]));
++                }
++
++                res_imgs->entries.push_back(std::move(res));
++            } break;
++
+         case PROJECTOR_TYPE_MLP:
+         case PROJECTOR_TYPE_MLP_NORM:
+         case PROJECTOR_TYPE_LDP:
+@@ -6096,6 +6217,7 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
+                 n_patches = dsv4_get_block_layout(n_llm_w, n_llm_h, img->lead_pad).n_out;
+             } break;
+         case PROJECTOR_TYPE_DEEPSEEK41:
++        case PROJECTOR_TYPE_DEEPSEEK41V:
+             {
+                 const int out_patch_size = params.patch_size * params.n_merge;
+                 const int n_llm_w = CLIP_ALIGN(img->nx, out_patch_size) / out_patch_size;
+@@ -6645,6 +6767,34 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
+                 }
+                 set_input_i32("positions", positions);
+             } break;
++        case PROJECTOR_TYPE_DEEPSEEK41V:
++            {
++                // mrope layout, only the first 2 channels are used
++                int n_patches_per_row = image_size_width / patch_size;
++                std::vector<int32_t> positions(n_pos * 4, 0);
++                for (int i = 0; i < n_pos; i++) {
++                    positions[i]         = i / n_patches_per_row;
++                    positions[n_pos + i] = i % n_patches_per_row;
++                }
++                set_input_i32("positions", positions);
++
++                // reading-order block: rows [0, n_grid) are the aligner output, then start / end / newline
++                const int n_merge = hparams.n_merge;
++                const int n_llm_w = CLIP_ALIGN(pos_w, n_merge) / n_merge;
++                const int n_llm_h = CLIP_ALIGN(pos_h, n_merge) / n_merge;
++                const int n_grid  = n_llm_w * n_llm_h;
++                std::vector<int32_t> idx;
++                idx.reserve(dsv41_n_block_tokens(n_llm_w, n_llm_h));
++                idx.push_back(n_grid);         // IMAGE_START
++                for (int r = 0; r < n_llm_h; r++) {
++                    for (int c = 0; c < n_llm_w; c++) {
++                        idx.push_back(r * n_llm_w + c);
++                    }
++                    idx.push_back(n_grid + 2); // IMAGE_NEW_LINE
++                }
++                idx.push_back(n_grid + 1);     // IMAGE_END
++                set_input_i32("layout_idx", idx);
++            } break;
+         case PROJECTOR_TYPE_GEMMA4UA:
+             {
+                 // no extra inputs
+@@ -6740,6 +6890,7 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
+         case PROJECTOR_TYPE_KIMIK25:
+         case PROJECTOR_TYPE_DEEPSEEK4V:
+         case PROJECTOR_TYPE_DEEPSEEK41:
++        case PROJECTOR_TYPE_DEEPSEEK41V:
+             return ctx->model.mm_2_w->ne[1];
+         case PROJECTOR_TYPE_COGVLM:
+         case PROJECTOR_TYPE_GLM4V:
+@@ -6842,6 +6993,11 @@ int clip_get_audio_n_mel(const struct clip_ctx * ctx) {
+ 
+ int clip_get_image_max_tokens(const struct clip_ctx * ctx) {
+     const auto & hparams = ctx->model.hparams;
++    if (ctx->model.proj_type == PROJECTOR_TYPE_DEEPSEEK4V ||
++        ctx->model.proj_type == PROJECTOR_TYPE_DEEPSEEK41 ||
++        ctx->model.proj_type == PROJECTOR_TYPE_DEEPSEEK41V) {
++        return hparams.dsv4_max_n_token;
++    }
+     const int merge = hparams.n_merge == 0 ? 1 : hparams.n_merge;
+     const int patch_area = hparams.patch_size * hparams.patch_size * merge * merge;
+     return patch_area > 0 ? hparams.image_max_pixels / patch_area : 0;
+diff --git a/examples/mtmd/mtmd.cpp b/examples/mtmd/mtmd.cpp
+index 4388dde9..b314e745 100644
+--- a/examples/mtmd/mtmd.cpp
++++ b/examples/mtmd/mtmd.cpp
+@@ -325,7 +325,7 @@ struct mtmd_context {
+                 img_end = "<|media_end|>";
+             }
+         }
+-        else if (proj == PROJECTOR_TYPE_DEEPSEEK4V || proj == PROJECTOR_TYPE_DEEPSEEK41) {
++        else if (proj == PROJECTOR_TYPE_DEEPSEEK4V || proj == PROJECTOR_TYPE_DEEPSEEK41 || proj == PROJECTOR_TYPE_DEEPSEEK41V) {
+             // markers are learned embeddings emitted by the encoder graph
+             img_beg = "";
+             img_end = "";

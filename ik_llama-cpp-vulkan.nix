@@ -37,6 +37,7 @@ self: super: {
           ./patches/ik-llama-json-schema-pattern.patch
           ./patches/ik-llama-kimi-k3.patch
           ./patches/ik-llama-deepseek41-kimi-fix.patch
+          ./patches/ik-llama-deepseek41v-mmproj.patch
         ];
 
         # Build includes build_kimi_k3.cpp from patches

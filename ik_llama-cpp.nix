@@ -37,6 +37,7 @@ self: super: {
           ./patches/ik-llama-kimi-k3.patch
           ./patches/ik-llama-kimi-k3-requires-all.patch
           ./patches/ik-llama-deepseek41-kimi-fix.patch
+          ./patches/ik-llama-deepseek41v-mmproj.patch
         ];
 
 
