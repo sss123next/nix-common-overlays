@@ -40,7 +40,7 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        hash = "sha256-P+mKEcMmcKzUS7aOxBx468U2zk+Do/y6pgWnXCZtFw4=";
       };
 
       # Upstream now sets MAX_DOCUMENT_RUNTIME_BYTES = 2_132_000 (>= our 2_100_000 patch);
