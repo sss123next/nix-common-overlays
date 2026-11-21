@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.28.0-unstable-2026-11-20";
+      version = "0.28.3-unstable-2026-11-21";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
-        # main @ 2026-11-20
-        rev = "e108e089bd5dc97813b67a0f27ef7e13d855a057";
-        sha256 = "sha256-SrOXU+6rWM3xEAW6n7TPPEhiX48Hs8sP/vhjxUhoIdY=";
+        # main @ 2026-11-21
+        rev = "b62d4ab7fa384c7308e2d08babb095f65509bf5b";
+        sha256 = "sha256-8h5MCrMl2P4jrRqk4kemeAgH9ZGNrYvdceyL8OFOz5E=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
@@ -40,7 +40,7 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-zKi8W+sllovL+p5tVnjRhbQCYagpvoJkF/KNU9nUOjo=";
+        hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
       };
 
       # Upstream now sets MAX_DOCUMENT_RUNTIME_BYTES = 2_132_000 (>= our 2_100_000 patch);
