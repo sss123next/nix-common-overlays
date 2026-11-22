@@ -1,8 +1,8 @@
 diff --git a/doc/imv.5.txt b/doc/imv.5.txt
-index 3f009fa..528e140 100644
+index 3f009fa..b9230a8 100644
 --- a/doc/imv.5.txt
 +++ b/doc/imv.5.txt
-@@ -146,4 +146,14 @@ called 'less', '>' is called 'greater'.
+@@ -146,4 +146,16 @@ called 'less', '>' is called 'greater'.
  A complete list of keysyms can also be found on most systems with the
  'dumpkeys -l' command.
  
@@ -11,14 +11,16 @@ index 3f009fa..528e140 100644
 +'<MouseForward>' and '<MouseBack>' for mouse buttons, and '<WheelUp>',
 +'<WheelDown>', '<WheelLeft>' and '<WheelRight>' for scroll events, for
 +example: '<MouseSide> = reset' or '<WheelDown> = next'. The angle brackets
-+are required, as for multi-character key names. Button names carry the
-+'Mouse' prefix to avoid clashing with arrow keys and browser keysyms in the
-+shared bind table. When no command is bound to a scroll event, the wheel
-+keeps its default behaviour of zooming the image.
++are required, as for multi-character key names. Modifiers apply to mouse
++events as well, in the same order as for keys: '<Ctrl+MouseLeft>',
++'<Ctrl+Shift+WheelUp>'. Button names carry the 'Mouse' prefix to avoid
++clashing with arrow keys and browser keysyms in the shared bind table. When
++no command is bound to a scroll event, the wheel keeps its default
++behaviour of zooming the image.
 +
  **imv**(1)
 diff --git a/src/imv.c b/src/imv.c
-index 3873963..bc81058 100644
+index 3873963..28fd333 100644
 --- a/src/imv.c
 +++ b/src/imv.c
 @@ -445,6 +445,34 @@ static void key_handler(struct imv *imv, const struct imv_event *event)
@@ -56,14 +58,17 @@ index 3873963..bc81058 100644
  static void event_handler(void *data, const struct imv_event *e)
  {
    struct imv *imv = data;
-@@ -471,8 +499,38 @@ static void event_handler(void *data, const struct imv_event *e)
+@@ -471,8 +499,45 @@ static void event_handler(void *data, const struct imv_event *e)
              e->data.mouse_motion.dy, imv->current_image);
        }
        break;
 +    case IMV_EVENT_MOUSE_BUTTON:
 +      {
-+        const char *name = mouse_button_name(e->data.mouse_button.button);
-+        if (name && e->data.mouse_button.pressed) {
++        const char *button = mouse_button_name(e->data.mouse_button.button);
++        if (button && e->data.mouse_button.pressed) {
++          const char *mods = e->data.mouse_button.mods ? e->data.mouse_button.mods : "";
++          char name[128];
++          snprintf(name, sizeof name, "%s%s", mods, button);
 +          struct list *cmds = imv_bind_handle_event(imv->binds, name);
 +          if (cmds) {
 +            imv_command_exec_list(imv->commands, cmds, imv);
@@ -73,8 +78,9 @@ index 3873963..bc81058 100644
 +      break;
      case IMV_EVENT_MOUSE_SCROLL:
        {
-+        /* Bindable as WheelUp/WheelDown/WheelLeft/WheelRight; fall back to
-+         * the default cursor-centred zoom when nothing is bound. */
++        /* Bindable as WheelUp/WheelDown/WheelLeft/WheelRight (optionally with
++         * modifiers); fall back to the default cursor-centred zoom when
++         * nothing is bound. */
 +        const double sdx = e->data.mouse_scroll.dx;
 +        const double sdy = e->data.mouse_scroll.dy;
 +        const double adx = sdx < 0 ? -sdx : sdx;
@@ -86,7 +92,10 @@ index 3873963..bc81058 100644
 +          wheel = sdx < 0 ? "WheelLeft" : "WheelRight";
 +        }
 +        if (wheel) {
-+          struct list *cmds = imv_bind_handle_event(imv->binds, wheel);
++          const char *mods = e->data.mouse_scroll.mods ? e->data.mouse_scroll.mods : "";
++          char name[128];
++          snprintf(name, sizeof name, "%s%s", mods, wheel);
++          struct list *cmds = imv_bind_handle_event(imv->binds, name);
 +          if (cmds) {
 +            imv_command_exec_list(imv->commands, cmds, imv);
 +            break;
@@ -95,8 +104,59 @@ index 3873963..bc81058 100644
          double x, y;
          imv_window_get_mouse_position(imv->window, &x, &y);
          imv_viewport_zoom(imv->view, imv->current_image, IMV_ZOOM_MOUSE,
+diff --git a/src/keyboard.c b/src/keyboard.c
+index 119f3f8..711fc3f 100644
+--- a/src/keyboard.c
++++ b/src/keyboard.c
+@@ -86,6 +86,11 @@ static const char *describe_prefix(struct imv_keyboard *keyboard)
+   }
+ }
+ 
++const char *imv_keyboard_describe_mods(struct imv_keyboard *keyboard)
++{
++  return describe_prefix(keyboard);
++}
++
+ size_t imv_keyboard_keyname(struct imv_keyboard *keyboard, int scancode, char *buf, size_t buflen)
+ {
+   xkb_keysym_t keysym = xkb_state_key_get_one_sym(keyboard->state, scancode + scancode_offset);
+diff --git a/src/keyboard.h b/src/keyboard.h
+index cba806b..a3a9317 100644
+--- a/src/keyboard.h
++++ b/src/keyboard.h
+@@ -20,6 +20,12 @@ void imv_keyboard_update_mods(struct imv_keyboard *keyboard,
+     int depressed, int latched, int locked);
+ 
+ /* Write the null-terminated name of the key corresponding to scancode into buf */
++/* Returns a static string describing the currently active modifier keys in
++ * the same form used by imv_keyboard_describe_key: "" or e.g. "Ctrl+Shift+".
++ * Intended for events that do not come from the keyboard (mouse buttons) so
++ * that they can be bound with modifiers like any key. */
++const char *imv_keyboard_describe_mods(struct imv_keyboard *keyboard);
++
+ size_t imv_keyboard_keyname(struct imv_keyboard *keyboard, int scancode, char *buf, size_t buflen);
+ 
+ /* Describe the key corresponding to scancode, with modifier keys prefixed */
+diff --git a/src/window.h b/src/window.h
+index 68765a7..4366317 100644
+--- a/src/window.h
++++ b/src/window.h
+@@ -39,9 +39,13 @@ struct imv_event {
+     struct {
+       int button;
+       bool pressed;
++      /* static prefix describing active modifiers, e.g. "Ctrl+" (never NULL) */
++      const char *mods;
+     } mouse_button;
+     struct {
+       double dx, dy;
++      /* static prefix describing active modifiers, e.g. "Ctrl+" (never NULL) */
++      const char *mods;
+     } mouse_scroll;
+     struct {
+       int dx, dy;
 diff --git a/src/wl_window.c b/src/wl_window.c
-index 8576500..5129b48 100644
+index 8576500..7415a88 100644
 --- a/src/wl_window.c
 +++ b/src/wl_window.c
 @@ -67,13 +67,14 @@ struct imv_window {
@@ -133,7 +193,7 @@ index 8576500..5129b48 100644
    }
  }
  
-@@ -413,17 +416,20 @@ static void pointer_frame(void *data, struct wl_pointer *pointer)
+@@ -413,17 +416,21 @@ static void pointer_frame(void *data, struct wl_pointer *pointer)
      imv_window_push_event(window, &e);
    }
  
@@ -151,7 +211,8 @@ index 8576500..5129b48 100644
 +        .data = {
 +          .mouse_button = {
 +            .button = (int)(0x110 + i), /* BTN_* code */
-+            .pressed = window->pointer.current.mouse[i]
++            .pressed = window->pointer.current.mouse[i],
++            .mods = imv_keyboard_describe_mods(window->keyboard)
 +          }
          }
 -      }
@@ -164,7 +225,17 @@ index 8576500..5129b48 100644
    }
  
    if (window->pointer.change.scroll_dx || window->pointer.change.scroll_dy) {
-@@ -1083,7 +1089,7 @@ void imv_window_set_fullscreen(struct imv_window *window, bool fullscreen)
+@@ -432,7 +439,8 @@ static void pointer_frame(void *data, struct wl_pointer *pointer)
+       .data = {
+         .mouse_scroll = {
+           .dx = wl_fixed_to_double(window->pointer.change.scroll_dx),
+-          .dy = wl_fixed_to_double(window->pointer.change.scroll_dy)
++          .dy = wl_fixed_to_double(window->pointer.change.scroll_dy),
++          .mods = imv_keyboard_describe_mods(window->keyboard)
+         }
+       }
+     };
+@@ -1083,7 +1091,7 @@ void imv_window_set_fullscreen(struct imv_window *window, bool fullscreen)
  bool imv_window_get_mouse_button(struct imv_window *window, int button)
  {
    if (button == 1) {
@@ -174,26 +245,52 @@ index 8576500..5129b48 100644
    return false;
  }
 diff --git a/src/x11_window.c b/src/x11_window.c
-index acf9403..3fce3d0 100644
+index acf9403..f0ea6aa 100644
 --- a/src/x11_window.c
 +++ b/src/x11_window.c
-@@ -405,6 +405,19 @@ void imv_window_pump_events(struct imv_window *window, imv_event_handler handler
-         if (handler) {
+@@ -385,7 +385,8 @@ void imv_window_pump_events(struct imv_window *window, imv_event_handler handler
+           .data = {
+             .mouse_button = {
+               .button = 1,
+-              .pressed = xev.type == ButtonPress
++              .pressed = xev.type == ButtonPress,
++              .mods = imv_keyboard_describe_mods(window->keyboard)
+             }
+           }
+         };
+@@ -393,12 +394,31 @@ void imv_window_pump_events(struct imv_window *window, imv_event_handler handler
            handler(data, &e);
          }
+       } else if (xev.xbutton.button == Button4 || xev.xbutton.button == Button5) {
++        /* X sends press *and* release for wheel buttons; only the press is
++         * interesting, otherwise every notch would fire twice. */
++        if (xev.type == ButtonPress) {
++          struct imv_event e = {
++            .type = IMV_EVENT_MOUSE_SCROLL,
++            .data = {
++              .mouse_scroll = {
++                .dx = 0,
++                .dy = xev.xbutton.button == Button4 ? -1 : 1,
++                .mods = imv_keyboard_describe_mods(window->keyboard)
++              }
++            }
++          };
++          if (handler) {
++            handler(data, &e);
++          }
++        }
 +      } else {
-+        struct imv_event e = {
+         struct imv_event e = {
+-          .type = IMV_EVENT_MOUSE_SCROLL,
 +          .type = IMV_EVENT_MOUSE_BUTTON,
-+          .data = {
+           .data = {
+-            .mouse_scroll = {
+-              .dx = 0,
+-              .dy = xev.xbutton.button == Button4 ? -1 : 1
 +            .mouse_button = {
 +              .button = xev.xbutton.button,
-+              .pressed = xev.type == ButtonPress
-+            }
-+          }
-+        };
-+        if (handler) {
-+          handler(data, &e);
-+        }
-       }
-     } else if (xev.type == MotionNotify) {
-       window->pointer.current.x = xev.xmotion.x;
++              .pressed = xev.type == ButtonPress,
++              .mods = imv_keyboard_describe_mods(window->keyboard)
+             }
+           }
+         };
