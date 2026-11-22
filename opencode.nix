@@ -34,7 +34,7 @@ self: super: {
             bun install \
               --cpu="${if stdenv.hostPlatform.isAarch64 then "arm64" else "x64"}" \
               --os="${if stdenv.hostPlatform.isLinux then "linux" else "darwin"}" \
-              --filter '!./' \
+              --filter './' \
               --filter './packages/cli' \
               --filter './packages/desktop' \
               --filter './packages/app' \
@@ -74,7 +74,7 @@ self: super: {
           # placeholders until recalibrated where they can be built — with a stale declared hash
           # Nix silently reuses an existing store path instead of rebuilding (verified 2026-09).
           outputHash = {
-            "x86_64-linux"   = "sha256-ieIVBRyQvhdOXZdkKIbyCSKA9tU1X9sNPkTjtTiubgo=";
+            "x86_64-linux"   = "sha256-dS+RzmE3u5y71321gGBfkhfO64N/9VgoDNXk6pRC83s=";
             "aarch64-linux"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "aarch64-darwin" = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
             "x86_64-darwin"  = "sha256-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx=";
@@ -100,9 +100,9 @@ self: super: {
       src = fetchFromGitHub {
         owner = "anomalyco";
         repo = "opencode";
-        rev = "a40c6d7f6874ec10bc62985abdbcba46bab66256";
+        rev = "f3aef0ba254086b40f1e9fbf58d5651b13eb1691";
 #        ref = "production";
-        hash = "sha256-ME3acdZwJU+GKC7vT/w/VGjpvcU9RFgB4+jgBe0I46c=";
+        hash = "sha256-KaafGlJ6aYHYb8/qccHH0EgwPfbK1o+IjPcAbvdPhz0=";
       };
 
       # The native-fetch-timeout patch has been upstreamed upstream in this rev (174200d):
@@ -139,7 +139,7 @@ self: super: {
             'console.warn(`Warning: This script requires bun@''${expectedBunVersionRange}'
         ''
         # schema.ts imports prettier solely to pretty-print the generated JSON. Prettier is a root
-        # workspace devDependency and our FOD install excludes the root (--filter '!./', like
+        # workspace devDependency and our FOD install includes the root (--filter './', like
         # upstream's in-tree nix packaging, which therefore never runs schema.ts), so it cannot be
         # resolved at build time. Stub format() to return its input unchanged instead of adding an
         # extra build input for cosmetics only (bun transpiles without type-checking).
