@@ -138,11 +138,11 @@ self: super: {
             'throw new Error(`This script requires bun@''${expectedBunVersionRange}' \
             'console.warn(`Warning: This script requires bun@''${expectedBunVersionRange}'
         ''
-        # schema.ts imports prettier solely to pretty-print the generated JSON. Prettier is a root
-        # workspace devDependency and our FOD install includes the root (--filter './', like
-        # upstream's in-tree nix packaging, which therefore never runs schema.ts), so it cannot be
-        # resolved at build time. Stub format() to return its input unchanged instead of adding an
-        # extra build input for cosmetics only (bun transpiles without type-checking).
+        # schema.ts imports prettier solely to pretty-print the generated JSON. Since production
+        # f3aef0b the FOD install includes the root workspace (--filter './', matching upstream
+        # nix/node_modules.nix), so prettier resolves naturally; the stub stays as cheap insurance
+        # in case the filter regresses to '!./' (bun transpiles without type-checking — the stub
+        # only affects cosmetics of the generated JSON).
         + ''
           substituteInPlace packages/cli/script/schema.ts \
             --replace-fail 'import { format } from "prettier"' \
