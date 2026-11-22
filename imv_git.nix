@@ -10,7 +10,7 @@ self: super:
   imv_git =
     with super;
     imv.overrideAttrs (old: rec {
-      version = "7dc0dda-git";
+      version = "7dc0dda-git-r1";
       src = fetchGit {
         url = "https://git.sr.ht/~exec64/imv";
         ref = "master";
