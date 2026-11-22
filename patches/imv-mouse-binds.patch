@@ -1,0 +1,194 @@
+diff --git a/doc/imv.5.txt b/doc/imv.5.txt
+index 3f009fa..95e4143 100644
+--- a/doc/imv.5.txt
++++ b/doc/imv.5.txt
+@@ -146,4 +146,12 @@ called 'less', '>' is called 'greater'.
+ A complete list of keysyms can also be found on most systems with the
+ 'dumpkeys -l' command.
+ 
++Mouse buttons and the scroll wheel can be bound by name: '<Left>', '<Middle>',
++'<Right>', '<Side>', '<Extra>', '<Forward>' and '<Back>' for mouse buttons,
++and '<WheelUp>', '<WheelDown>', '<WheelLeft>' and '<WheelRight>' for scroll
++events, for example: '<Side> = reset' or '<WheelDown> = next'. The angle
++brackets are required, as for multi-character key names. When no command is
++bound to a scroll event, the wheel keeps its default behaviour of zooming
++the image.
++
+ **imv**(1)
+diff --git a/src/imv.c b/src/imv.c
+index 3873963..8671ab6 100644
+--- a/src/imv.c
++++ b/src/imv.c
+@@ -445,6 +445,31 @@ static void key_handler(struct imv *imv, const struct imv_event *event)
+ }
+ 
+ 
++/* Bindable name for a mouse button, accepting both X11 core button numbers
++ * and Wayland (evdev) BTN_* codes, or NULL if the button is not bindable. */
++static const char *mouse_button_name(int button)
++{
++  switch(button) {
++    /* X11 core pointer buttons (4/5 are delivered as scroll events) */
++    case 1: return "Left";
++    case 2: return "Middle";
++    case 3: return "Right";
++    case 6: return "Forward";
++    case 7: return "Back";
++    case 8: return "Side";
++    case 9: return "Extra";
++    /* Wayland: evdev BTN_* codes */
++    case 0x110: return "Left";    /* BTN_LEFT */
++    case 0x111: return "Right";   /* BTN_RIGHT */
++    case 0x112: return "Middle";  /* BTN_MIDDLE */
++    case 0x113: return "Side";    /* BTN_SIDE */
++    case 0x114: return "Extra";   /* BTN_EXTRA */
++    case 0x115: return "Forward"; /* BTN_FORWARD */
++    case 0x116: return "Back";    /* BTN_BACK */
++  }
++  return NULL;
++}
++
+ static void event_handler(void *data, const struct imv_event *e)
+ {
+   struct imv *imv = data;
+@@ -471,8 +496,38 @@ static void event_handler(void *data, const struct imv_event *e)
+             e->data.mouse_motion.dy, imv->current_image);
+       }
+       break;
++    case IMV_EVENT_MOUSE_BUTTON:
++      {
++        const char *name = mouse_button_name(e->data.mouse_button.button);
++        if (name && e->data.mouse_button.pressed) {
++          struct list *cmds = imv_bind_handle_event(imv->binds, name);
++          if (cmds) {
++            imv_command_exec_list(imv->commands, cmds, imv);
++          }
++        }
++      }
++      break;
+     case IMV_EVENT_MOUSE_SCROLL:
+       {
++        /* Bindable as WheelUp/WheelDown/WheelLeft/WheelRight; fall back to
++         * the default cursor-centred zoom when nothing is bound. */
++        const double sdx = e->data.mouse_scroll.dx;
++        const double sdy = e->data.mouse_scroll.dy;
++        const double adx = sdx < 0 ? -sdx : sdx;
++        const double ady = sdy < 0 ? -sdy : sdy;
++        const char *wheel = NULL;
++        if (sdy != 0.0 && ady >= adx) {
++          wheel = sdy < 0 ? "WheelUp" : "WheelDown";
++        } else if (sdx != 0.0) {
++          wheel = sdx < 0 ? "WheelLeft" : "WheelRight";
++        }
++        if (wheel) {
++          struct list *cmds = imv_bind_handle_event(imv->binds, wheel);
++          if (cmds) {
++            imv_command_exec_list(imv->commands, cmds, imv);
++            break;
++          }
++        }
+         double x, y;
+         imv_window_get_mouse_position(imv->window, &x, &y);
+         imv_viewport_zoom(imv->view, imv->current_image, IMV_ZOOM_MOUSE,
+diff --git a/src/wl_window.c b/src/wl_window.c
+index 8576500..5129b48 100644
+--- a/src/wl_window.c
++++ b/src/wl_window.c
+@@ -67,13 +67,14 @@ struct imv_window {
+ 
+     struct {
+       wl_fixed_t x, y;
+-      bool mouse1;
++      /* indexed by evdev BTN_* code, relative to BTN_LEFT (272) */
++      bool mouse[8];
+     } current;
+ 
+     struct {
+       wl_fixed_t dx, dy;
+       wl_fixed_t scroll_dx, scroll_dy;
+-      bool dmouse1;
++      bool dmouse[8];
+     } change;
+   } pointer;
+ 
+@@ -367,10 +368,12 @@ static void pointer_button(void *data, struct wl_pointer *pointer,
+   (void)time;
+ 
+   struct imv_window *window = data;
+-  const uint32_t MOUSE1 = 0x110;
+-  if (button == MOUSE1) {
+-    window->pointer.change.dmouse1 |= state != window->pointer.current.mouse1;
+-    window->pointer.current.mouse1 = state;
++  const uint32_t BTN_LEFT = 0x110;
++  const uint32_t BTN_BACK = 0x116;
++  if (button >= BTN_LEFT && button <= BTN_BACK) {
++    const size_t idx = button - BTN_LEFT;
++    window->pointer.change.dmouse[idx] |= (state != 0) != window->pointer.current.mouse[idx];
++    window->pointer.current.mouse[idx] = (state != 0);
+   }
+ }
+ 
+@@ -413,17 +416,20 @@ static void pointer_frame(void *data, struct wl_pointer *pointer)
+     imv_window_push_event(window, &e);
+   }
+ 
+-  if (window->pointer.change.dmouse1) {
+-    struct imv_event e = {
+-      .type = IMV_EVENT_MOUSE_BUTTON,
+-      .data = {
+-        .mouse_button = {
+-          .button = 1,
+-          .pressed = window->pointer.current.mouse1
++  for(size_t i = 0; i < 8; ++i) {
++    if (window->pointer.change.dmouse[i]) {
++      struct imv_event e = {
++        .type = IMV_EVENT_MOUSE_BUTTON,
++        .data = {
++          .mouse_button = {
++            .button = (int)(0x110 + i), /* BTN_* code */
++            .pressed = window->pointer.current.mouse[i]
++          }
+         }
+-      }
+-    };
+-    imv_window_push_event(window, &e);
++      };
++      imv_window_push_event(window, &e);
++      window->pointer.change.dmouse[i] = false;
++    }
+   }
+ 
+   if (window->pointer.change.scroll_dx || window->pointer.change.scroll_dy) {
+@@ -1083,7 +1089,7 @@ void imv_window_set_fullscreen(struct imv_window *window, bool fullscreen)
+ bool imv_window_get_mouse_button(struct imv_window *window, int button)
+ {
+   if (button == 1) {
+-    return window->pointer.current.mouse1;
++    return window->pointer.current.mouse[0]; /* BTN_LEFT */
+   }
+   return false;
+ }
+diff --git a/src/x11_window.c b/src/x11_window.c
+index acf9403..3fce3d0 100644
+--- a/src/x11_window.c
++++ b/src/x11_window.c
+@@ -405,6 +405,19 @@ void imv_window_pump_events(struct imv_window *window, imv_event_handler handler
+         if (handler) {
+           handler(data, &e);
+         }
++      } else {
++        struct imv_event e = {
++          .type = IMV_EVENT_MOUSE_BUTTON,
++          .data = {
++            .mouse_button = {
++              .button = xev.xbutton.button,
++              .pressed = xev.type == ButtonPress
++            }
++          }
++        };
++        if (handler) {
++          handler(data, &e);
++        }
+       }
+     } else if (xev.type == MotionNotify) {
+       window->pointer.current.x = xev.xmotion.x;
