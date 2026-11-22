@@ -1,25 +1,27 @@
 diff --git a/doc/imv.5.txt b/doc/imv.5.txt
-index 3f009fa..95e4143 100644
+index 3f009fa..528e140 100644
 --- a/doc/imv.5.txt
 +++ b/doc/imv.5.txt
-@@ -146,4 +146,12 @@ called 'less', '>' is called 'greater'.
+@@ -146,4 +146,14 @@ called 'less', '>' is called 'greater'.
  A complete list of keysyms can also be found on most systems with the
  'dumpkeys -l' command.
  
-+Mouse buttons and the scroll wheel can be bound by name: '<Left>', '<Middle>',
-+'<Right>', '<Side>', '<Extra>', '<Forward>' and '<Back>' for mouse buttons,
-+and '<WheelUp>', '<WheelDown>', '<WheelLeft>' and '<WheelRight>' for scroll
-+events, for example: '<Side> = reset' or '<WheelDown> = next'. The angle
-+brackets are required, as for multi-character key names. When no command is
-+bound to a scroll event, the wheel keeps its default behaviour of zooming
-+the image.
++Mouse buttons and the scroll wheel can be bound by name: '<MouseLeft>',
++'<MouseMiddle>', '<MouseRight>', '<MouseSide>', '<MouseExtra>',
++'<MouseForward>' and '<MouseBack>' for mouse buttons, and '<WheelUp>',
++'<WheelDown>', '<WheelLeft>' and '<WheelRight>' for scroll events, for
++example: '<MouseSide> = reset' or '<WheelDown> = next'. The angle brackets
++are required, as for multi-character key names. Button names carry the
++'Mouse' prefix to avoid clashing with arrow keys and browser keysyms in the
++shared bind table. When no command is bound to a scroll event, the wheel
++keeps its default behaviour of zooming the image.
 +
  **imv**(1)
 diff --git a/src/imv.c b/src/imv.c
-index 3873963..8671ab6 100644
+index 3873963..bc81058 100644
 --- a/src/imv.c
 +++ b/src/imv.c
-@@ -445,6 +445,31 @@ static void key_handler(struct imv *imv, const struct imv_event *event)
+@@ -445,6 +445,34 @@ static void key_handler(struct imv *imv, const struct imv_event *event)
  }
  
  
@@ -27,23 +29,26 @@ index 3873963..8671ab6 100644
 + * and Wayland (evdev) BTN_* codes, or NULL if the button is not bindable. */
 +static const char *mouse_button_name(int button)
 +{
++  /* NB: names are prefixed with "Mouse" deliberately -- bare "Left"/"Right"
++   * would collide with the arrow keys' descriptions in the shared bind
++   * table, and "Back"/"Forward" with the XF86 browser keysyms. */
 +  switch(button) {
 +    /* X11 core pointer buttons (4/5 are delivered as scroll events) */
-+    case 1: return "Left";
-+    case 2: return "Middle";
-+    case 3: return "Right";
-+    case 6: return "Forward";
-+    case 7: return "Back";
-+    case 8: return "Side";
-+    case 9: return "Extra";
++    case 1: return "MouseLeft";
++    case 2: return "MouseMiddle";
++    case 3: return "MouseRight";
++    case 6: return "MouseForward";
++    case 7: return "MouseBack";
++    case 8: return "MouseSide";
++    case 9: return "MouseExtra";
 +    /* Wayland: evdev BTN_* codes */
-+    case 0x110: return "Left";    /* BTN_LEFT */
-+    case 0x111: return "Right";   /* BTN_RIGHT */
-+    case 0x112: return "Middle";  /* BTN_MIDDLE */
-+    case 0x113: return "Side";    /* BTN_SIDE */
-+    case 0x114: return "Extra";   /* BTN_EXTRA */
-+    case 0x115: return "Forward"; /* BTN_FORWARD */
-+    case 0x116: return "Back";    /* BTN_BACK */
++    case 0x110: return "MouseLeft";    /* BTN_LEFT */
++    case 0x111: return "MouseRight";   /* BTN_RIGHT */
++    case 0x112: return "MouseMiddle";  /* BTN_MIDDLE */
++    case 0x113: return "MouseSide";    /* BTN_SIDE */
++    case 0x114: return "MouseExtra";   /* BTN_EXTRA */
++    case 0x115: return "MouseForward"; /* BTN_FORWARD */
++    case 0x116: return "MouseBack";    /* BTN_BACK */
 +  }
 +  return NULL;
 +}
@@ -51,7 +56,7 @@ index 3873963..8671ab6 100644
  static void event_handler(void *data, const struct imv_event *e)
  {
    struct imv *imv = data;
-@@ -471,8 +496,38 @@ static void event_handler(void *data, const struct imv_event *e)
+@@ -471,8 +499,38 @@ static void event_handler(void *data, const struct imv_event *e)
              e->data.mouse_motion.dy, imv->current_image);
        }
        break;
