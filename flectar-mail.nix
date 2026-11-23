@@ -23,6 +23,10 @@ self: super: {
 
       cargoHash = "sha256-iEaa8lFROzeqVv+kwpkCIEkeSXiJ1+w4/Ckx362SAdU=";
 
+      patches = [
+        ./patches/flectar-mail/0001-add-caching-credential-store.patch
+      ];
+
       nativeBuildInputs = [
         pkg-config
         python3
