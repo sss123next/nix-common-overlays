@@ -1,0 +1,29 @@
+diff --git a/src/platform/mod.rs b/src/platform/mod.rs
+index 430be5a3..57952069 100644
+--- a/src/platform/mod.rs
++++ b/src/platform/mod.rs
+@@ -77,7 +77,9 @@ pub(crate) fn email_fonts() -> Option<&'static EmailFonts> {
+ /// requires its own in-app purchases doesn't.
+ #[cfg(desktop)]
+ pub(crate) fn sells_sync() -> bool {
+-    true
++    // This build ships without Flectar's paid services: no web checkout,
++    // no subscription or billing UI.
++    false
+ }
+ 
+ /// How this device appears in Flectar Mail Sync's device list: its host name and
+diff --git a/ui/dialogs/settings-dialog.slint b/ui/dialogs/settings-dialog.slint
+index 55d51b6f..6e84dddc 100644
+--- a/ui/dialogs/settings-dialog.slint
++++ b/ui/dialogs/settings-dialog.slint
+@@ -920,6 +920,9 @@ export component SettingsDialog inherits Rectangle {
+     }
+ 
+     pure function settings-section-visible(section: string) -> bool {
++        // This build ships without Flectar's hosted services: no Flectar
++        // account sign-in, no paid anything. The Services page stays hidden.
++        if section == "Services" { return false; }
+         // No notifications on this platform: nothing to set.
+         if section == "Notifications" && SystemNotifications.availability == "" { return false; }
+         // Agents' apps run on computers; phones have none to connect.
