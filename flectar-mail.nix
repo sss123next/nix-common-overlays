@@ -12,16 +12,16 @@ self: super: {
     in
     rustPlatform.buildRustPackage {
       pname = "flectar-mail";
-      version = "0.1.0-unstable-2026-11-18";
+      version = "0.1.0-unstable-2026-11-23";
 
       src = fetchgit {
         url = "https://github.com/flectar/mail";
-        rev = "29793f68ac4738e2f116fcbaf7c4d59335b95c17";
-        sha256 = "sha256-AfZet0nCcHxZZpyHYhgldZA5qWdoj8Q5jWvO3BHECA4=";
+        rev = "acd839fed674fc31affe10353181eb389952d6ad";
+        sha256 = "sha256-IyW8kL2g26y40xLWfsuRdV9qxt1k3z7wlydoJeQW0Vg=";
         fetchSubmodules = true;
       };
 
-      cargoHash = "sha256-iEaa8lFROzeqVv+kwpkCIEkeSXiJ1+w4/Ckx362SAdU=";
+      cargoHash = "sha256-ktG54ml04+PqubI4dOGtyFXZJxPPIF+4ie+XUjHEncg=";
 
       patches = [
         ./patches/flectar-mail/0001-add-caching-credential-store.patch
