@@ -10,8 +10,8 @@ self: super: {
         owner = "QwenLM";
         repo = "qwen-code";
         # main @ 2026-11-22
-        rev = "6be1a2d6d5e08972362a62b508ae3ad4627218e7";
-        sha256 = "sha256-rqfkIGUMTPOovJfetHjnDEcNarS92zdEFaOEoevhpmg=";
+        rev = "18ac669a3a5f2b78db9e2916a753fadd2e672b51";
+        sha256 = "sha256-hB7ia3juxjrM+E6uw5Dsct9OajQDR0OOs1p3YYGluYE=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
