@@ -26,6 +26,7 @@ self: super: {
       patches = [
         ./patches/flectar-mail/0001-add-caching-credential-store.patch
         ./patches/flectar-mail/0002-disable-flectar-services.patch
+        ./patches/flectar-mail/0003-add-tls-cert-policy.patch
       ];
 
       nativeBuildInputs = [

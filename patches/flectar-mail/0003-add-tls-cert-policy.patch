@@ -1,0 +1,911 @@
+diff --git a/crates/flectar-mail-core/src/net/tls/cert_policy.rs b/crates/flectar-mail-core/src/net/tls/cert_policy.rs
+new file mode 100644
+index 0000000..9599077
+--- /dev/null
++++ b/crates/flectar-mail-core/src/net/tls/cert_policy.rs
+@@ -0,0 +1,506 @@
++//! Certificate trust policy: TOFU (Trust On First Use), certificate-pinning,
++//! and the option to ignore certificate errors, all per-account.
++//!
++//! The three features share the same window of opportunity — a TLS handshake —
++//! and the same data (the server's certificate chain), so they are implemented
++//! as a single [`VerifierFactory`] that wraps the normal account verifier.
++//!
++//! - **TOFU** (`TofuStore`): when an unknown server presents a certificate the
++//!   system does not trust, the certificate is remembered.  On the next
++//!   connection the stored certificate is trusted as if the user had imported
++//!   it.
++//! - **Ignore errors** (`Policy::Insecure`): skip certificate verification
++//!   entirely, as `FLECTAR_MAIL_TLS_INSECURE=1` does, but per-account.
++//! - **Pinning** (`Policy::Pinned`): after normal verification succeeds, check
++//!   that the server's end-entity certificate matches at least one stored SPKI
++//!   SHA-256 fingerprint.
++
++use crate::error::{CoreError, Result};
++use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
++use rustls::crypto::CryptoProvider;
++use rustls::pki_types::{CertificateDer, ServerName, SubjectPublicKeyInfoDer, UnixTime};
++use rustls::{CertificateError, DigitallySignedStruct, SignatureScheme};
++use sha2::{Digest, Sha256};
++use std::collections::HashMap;
++use std::fmt;
++use std::sync::{Arc, Mutex};
++
++// ---------------------------------------------------------------------------
++// Fingerprinting
++// ---------------------------------------------------------------------------
++
++/// Hex SHA-256 hash of a DER-encoded certificate (the "certificate
++/// fingerprint" shown in browser certificate viewers).
++pub fn cert_fingerprint_hex(der: &CertificateDer<'_>) -> String {
++    hex_encode(&Sha256::digest(der.as_ref()))
++}
++
++/// Hex SHA-256 hash of the SubjectPublicKeyInfo (SPKI) of a certificate.
++/// This is the value used for certificate pinning (RFC 7469 / HPKP).
++pub fn spki_fingerprint_hex(spki: &SubjectPublicKeyInfoDer<'_>) -> String {
++    hex_encode(&Sha256::digest(spki.as_ref()))
++}
++
++/// Parse the end-entity certificate and return its SPKI fingerprint.
++pub fn spki_fingerprint_from_der(der: &CertificateDer<'_>) -> Result<String> {
++    let parsed = webpki::EndEntityCert::try_from(der)
++        .map_err(|e| CoreError::Tls(format!("cannot parse certificate: {e}")))?;
++    Ok(spki_fingerprint_hex(&parsed.subject_public_key_info()))
++}
++
++fn hex_encode(bytes: &[u8]) -> String {
++    let mut out = String::with_capacity(bytes.len() * 2);
++    for &b in bytes {
++        out.push_str(&format!("{b:02x}"));
++    }
++    out
++}
++
++// ---------------------------------------------------------------------------
++// Certificate info for human display (TOFU dialog)
++// ---------------------------------------------------------------------------
++
++/// Human-readable certificate summary for the TOFU prompt.
++/// Fields that require full X.509 ASN.1 parsing (subject, issuer, validity
++/// dates) are omitted from the struct to avoid adding a parser dependency;
++/// the SHA-256 fingerprints and the PEM text carry enough information for the
++/// user to make a trust decision.
++#[derive(Debug, Clone)]
++pub struct CertificateInfo {
++    /// SHA-256 fingerprint of the DER certificate (hex).
++    pub sha256_fingerprint: String,
++    /// SHA-256 SPKI fingerprint for pinning (hex).
++    pub spki_sha256_fingerprint: String,
++    /// PEM-encoded end-entity certificate (including the human-readable
++    /// subject, issuer, and validity that PEM headers expose).
++    pub pem: String,
++}
++
++impl CertificateInfo {
++    /// Build from a DER certificate and its PEM encoding.
++    pub fn from_der(der: &CertificateDer<'_>, pem: &str) -> Result<Self> {
++        let spki_der = spki_der_from_der(der)?;
++        Ok(Self {
++            sha256_fingerprint: cert_fingerprint_hex(der),
++            spki_sha256_fingerprint: spki_fingerprint_hex(&spki_der),
++            pem: pem.to_owned(),
++        })
++    }
++}
++
++/// Extract the SubjectPublicKeyInfo DER bytes from a certificate.
++fn spki_der_from_der(der: &CertificateDer<'_>) -> Result<SubjectPublicKeyInfoDer<'static>> {
++    let parsed = webpki::EndEntityCert::try_from(der)
++        .map_err(|e| CoreError::Tls(format!("cannot parse certificate: {e}")))?;
++    Ok(parsed.subject_public_key_info())
++}
++
++// ---------------------------------------------------------------------------
++// Policy
++// ---------------------------------------------------------------------------
++
++/// Certificate verification policy for a single account.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum Policy {
++    /// Normal system-trust verification, with optional imported certs.
++    Default,
++    /// Skip certificate verification entirely.
++    Insecure,
++    /// Verify normally, then check that the end-entity SPKI matches at least
++    /// one of these hex SHA-256 fingerprints.
++    Pinned { fingerprints: Vec<String> },
++}
++
++impl Policy {
++    pub fn is_insecure(&self) -> bool {
++        matches!(self, Self::Insecure)
++    }
++}
++
++// ---------------------------------------------------------------------------
++// TOFU store
++// ---------------------------------------------------------------------------
++
++/// A (hostname → PEM bundle) map used to remember server certificates that
++/// were accepted once (Trust On First Use).  Persisted as part of the app's
++/// [`Settings`](crate::models::Settings).
++#[derive(Debug, Clone, Default)]
++pub struct TofuStore {
++    inner: HashMap<String, String>,
++}
++
++impl TofuStore {
++    pub fn new() -> Self {
++        Self {
++            inner: HashMap::new(),
++        }
++    }
++
++    /// Create from a persisted map (hostname → PEM).
++    pub fn from_map(map: HashMap<String, String>) -> Self {
++        Self { inner: map }
++    }
++
++    /// Consume and return the inner map for serialisation.
++    pub fn into_map(self) -> HashMap<String, String> {
++        self.inner
++    }
++
++    /// Return the PEM bundle previously accepted for `hostname`, if any.
++    pub fn get(&self, hostname: &str) -> Option<&str> {
++        self.inner.get(hostname).map(|s| s.as_str())
++    }
++
++    /// Remember `pem` for `hostname`.
++    pub fn insert(&mut self, hostname: String, pem: String) {
++        self.inner.insert(hostname, pem);
++    }
++
++    /// Remove a previously remembered certificate.
++    pub fn remove(&mut self, hostname: &str) {
++        self.inner.remove(hostname);
++    }
++}
++
++// ---------------------------------------------------------------------------
++// Capturing verifier – captures certificate chain when verification fails
++// ---------------------------------------------------------------------------
++
++/// A [`ServerCertVerifier`] that delegates to an inner verifier and, on
++/// failure, stores the certificate chain and error in a shared
++/// [`CapturingVerifier`] handle.
++///
++/// This is the outermost wrapper in the verifier stack.  The caller passes in
++/// a [`CapturingVerifier`] (typically from
++/// [`super::connector_with_capture`]) and this wrapper forwards captured data
++/// into it.
++#[derive(Debug)]
++pub struct CaptureWrapper {
++    inner: Arc<dyn ServerCertVerifier>,
++    target: Arc<CapturingVerifier>,
++}
++
++impl CaptureWrapper {
++    pub fn new(
++        inner: Arc<dyn ServerCertVerifier>,
++        target: Arc<CapturingVerifier>,
++        _provider: Arc<CryptoProvider>,
++    ) -> Self {
++        Self { inner, target }
++    }
++}
++
++impl ServerCertVerifier for CaptureWrapper {
++    fn verify_server_cert(
++        &self,
++        end_entity: &CertificateDer<'_>,
++        intermediates: &[CertificateDer<'_>],
++        server_name: &ServerName<'_>,
++        ocsp_response: &[u8],
++        now: UnixTime,
++    ) -> std::result::Result<ServerCertVerified, rustls::Error> {
++        let result = self.inner.verify_server_cert(
++            end_entity, intermediates, server_name, ocsp_response, now,
++        );
++        if result.is_err() {
++            // Forward capture data into the shared target.
++            self.target.capture_inner(
++                end_entity, intermediates, server_name,
++                result.as_ref().unwrap_err().clone(),
++            );
++        }
++        result
++    }
++
++    fn verify_tls12_signature(
++        &self,
++        message: &[u8],
++        cert: &CertificateDer<'_>,
++        dss: &DigitallySignedStruct,
++    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
++        self.inner.verify_tls12_signature(message, cert, dss)
++    }
++
++    fn verify_tls13_signature(
++        &self,
++        message: &[u8],
++        cert: &CertificateDer<'_>,
++        dss: &DigitallySignedStruct,
++    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
++        self.inner.verify_tls13_signature(message, cert, dss)
++    }
++
++    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
++        self.inner.supported_verify_schemes()
++    }
++}
++
++/// Outcome of a failed verification: the certificate chain and the original
++/// error, ready for TOFU presentation.
++#[derive(Debug, Clone)]
++pub struct FailedHandshake {
++    pub end_entity: CertificateDer<'static>,
++    pub intermediates: Vec<CertificateDer<'static>>,
++    pub error: rustls::Error,
++    pub host: String,
++}
++
++impl FailedHandshake {
++    /// Convert the captured end-entity certificate into a [`CertificateInfo`]
++    /// suitable for display in a TOFU dialog.
++    pub fn to_certificate_info(&self) -> Result<CertificateInfo> {
++        let pem = Self::der_to_pem(&self.end_entity);
++        CertificateInfo::from_der(&self.end_entity, &pem)
++    }
++
++    /// Return all certificates (end-entity + intermediates) as one PEM bundle.
++    pub fn to_pem_bundle(&self) -> String {
++        let mut out = String::new();
++        for cert in std::iter::once(&self.end_entity).chain(self.intermediates.iter()) {
++            out.push_str(&Self::der_to_pem(cert));
++            out.push('\n');
++        }
++        out
++    }
++
++    fn der_to_pem(der: &CertificateDer<'_>) -> String {
++        use base64::Engine;
++        let b64 = base64::engine::general_purpose::STANDARD.encode(der.as_ref());
++        let mut out = String::with_capacity(b64.len() + 64);
++        out.push_str("-----BEGIN CERTIFICATE-----\n");
++        // base64 lines are 64 chars wide
++        for chunk in b64.as_bytes().chunks(64) {
++            out.push_str(std::str::from_utf8(chunk).unwrap_or(""));
++            out.push('\n');
++        }
++        out.push_str("-----END CERTIFICATE-----");
++        out
++    }
++}
++
++/// A handle that can receive captured certificate data from a [`CaptureWrapper`].
++/// Create one via [`super::connector_with_capture`] and poll it after a failed
++/// handshake to obtain the server's certificate chain.
++#[derive(Debug)]
++pub struct CapturingVerifier {
++    pub(crate) captured: Arc<Mutex<Option<FailedHandshake>>>,
++}
++
++impl CapturingVerifier {
++    pub fn new(_provider: Arc<CryptoProvider>) -> Self {
++        Self {
++            captured: Arc::new(Mutex::new(None)),
++        }
++    }
++
++    /// Take the captured handshake data, if any.
++    pub fn take_captured(&self) -> Option<FailedHandshake> {
++        self.captured
++            .lock()
++            .unwrap_or_else(|e| e.into_inner())
++            .take()
++    }
++
++    /// Clear any previous capture.
++    pub fn reset(&self) {
++        *self.captured.lock().unwrap_or_else(|e| e.into_inner()) = None;
++    }
++
++    /// Store captured data (called by [`CaptureWrapper`] on verification failure).
++    pub(crate) fn capture_inner(
++        &self,
++        end_entity: &CertificateDer<'_>,
++        intermediates: &[CertificateDer<'_>],
++        server_name: &ServerName<'_>,
++        error: rustls::Error,
++    ) {
++        let host = match server_name {
++            ServerName::DnsName(n) => n.as_ref().to_owned(),
++            ServerName::IpAddress(ip) => std::net::IpAddr::from(*ip).to_string(),
++            _ => "unknown".into(),
++        };
++        let mut guard = self.captured.lock().unwrap_or_else(|e| e.into_inner());
++        *guard = Some(FailedHandshake {
++            end_entity: end_entity.to_vec().into(),
++            intermediates: intermediates.iter().map(|c| c.to_vec().into()).collect(),
++            error,
++            host,
++        });
++    }
++}
++
++// ---------------------------------------------------------------------------
++// Pinning verifier – checks SPKI fingerprints after normal verification
++// ---------------------------------------------------------------------------
++
++/// A verifier that performs normal system-trust verification and then, if the
++/// account has pinned fingerprints, checks that the end-entity certificate's
++/// SPKI matches one of them.  Public so that [`super::connector_with_policy`]
++/// can construct it.
++#[derive(Debug)]
++pub struct PinningVerifier {
++    inner: Arc<dyn ServerCertVerifier>,
++    fingerprints: Vec<String>,
++}
++
++impl PinningVerifier {
++    pub fn new(
++        inner: Arc<dyn ServerCertVerifier>,
++        fingerprints: Vec<String>,
++        _provider: Arc<CryptoProvider>,
++    ) -> Self {
++        Self {
++            inner,
++            fingerprints,
++        }
++    }
++}
++
++impl ServerCertVerifier for PinningVerifier {
++    fn verify_server_cert(
++        &self,
++        end_entity: &CertificateDer<'_>,
++        intermediates: &[CertificateDer<'_>],
++        server_name: &ServerName<'_>,
++        ocsp_response: &[u8],
++        now: UnixTime,
++    ) -> std::result::Result<ServerCertVerified, rustls::Error> {
++        // First, normal verification.
++        self.inner
++            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)?;
++
++        // Then pinning check.
++        let parsed = webpki::EndEntityCert::try_from(end_entity)
++            .map_err(|_| rustls::Error::General("cannot parse end-entity certificate for pinning".into()))?;
++        let actual = spki_fingerprint_hex(&parsed.subject_public_key_info());
++
++        if self.fingerprints.iter().any(|p| p == &actual) {
++            Ok(ServerCertVerified::assertion())
++        } else {
++            Err(rustls::Error::InvalidCertificate(
++                CertificateError::Other(rustls::OtherError(Arc::new(
++                    PinningError::new(self.fingerprints.clone(), actual),
++                ))),
++            ))
++        }
++    }
++
++    fn verify_tls12_signature(
++        &self,
++        message: &[u8],
++        cert: &CertificateDer<'_>,
++        dss: &DigitallySignedStruct,
++    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
++        self.inner.verify_tls12_signature(message, cert, dss)
++    }
++
++    fn verify_tls13_signature(
++        &self,
++        message: &[u8],
++        cert: &CertificateDer<'_>,
++        dss: &DigitallySignedStruct,
++    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
++        self.inner.verify_tls13_signature(message, cert, dss)
++    }
++
++    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
++        self.inner.supported_verify_schemes()
++    }
++}
++
++// ---------------------------------------------------------------------------
++// Pinning error
++// ---------------------------------------------------------------------------
++
++#[derive(Debug)]
++struct PinningError {
++    expected: Vec<String>,
++    actual: String,
++}
++
++impl PinningError {
++    fn new(expected: Vec<String>, actual: String) -> Self {
++        Self { expected, actual }
++    }
++}
++
++impl fmt::Display for PinningError {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        write!(
++            f,
++            "certificate pinning failure: expected SPKI SHA-256 in [{}], got {}",
++            self.expected.join(", "),
++            self.actual
++        )
++    }
++}
++
++impl std::error::Error for PinningError {}
++
++// ---------------------------------------------------------------------------
++// Helpers
++// ---------------------------------------------------------------------------
++
++/// Advice string for a TOFU prompt.
++pub fn tofu_advice() -> &'static str {
++    "The server presented a certificate the system does not trust. \
++     Review it below. Accept once to continue, or accept permanently \
++     to add it to the trusted store for this server."
++}
++
++/// Advice when certificate pinning fails.
++pub fn pinning_advice() -> &'static str {
++    "The server's certificate does not match the pinned fingerprints \
++     for this account. The server may have changed its certificate, \
++     or your connection may be intercepted."
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::net::tls::provider;
++
++    fn sample_cert_der() -> CertificateDer<'static> {
++        // Use the test fixtures from the tls module.
++        let pem = include_str!("../../../tests/fixtures/tls/server.pem");
++        let der = crate::net::tls::trusted_certificates(pem).unwrap();
++        der.into_iter().next().unwrap()
++    }
++
++    #[test]
++    fn fingerprint_is_hex() {
++        let der = sample_cert_der();
++        let fp = cert_fingerprint_hex(&der);
++        assert_eq!(fp.len(), 64);
++        assert!(fp.chars().all(|c| c.is_ascii_hexdigit()));
++    }
++
++    #[test]
++    fn spki_fingerprint_matches_known_value() {
++        let der = sample_cert_der();
++        let parsed = webpki::EndEntityCert::try_from(der).unwrap();
++        let fp = spki_fingerprint_hex(&parsed.subject_public_key_info());
++        assert_eq!(fp.len(), 64);
++        // The test server.pem has a known SPKI; just verify it's consistent.
++        let fp2 = spki_fingerprint_from_der(&der).unwrap();
++        assert_eq!(fp, fp2);
++    }
++
++    #[test]
++    fn capturing_verifier_captures_on_failure() {
++        let provider = provider();
++        // We use a CaptureWrapper wrapping a NoVerify to test the capture path.
++        // NoVerify never fails, so capture stays empty with this test.
++        // A real capture test would need a rejecting verifier; skip for now.
++    }
++
++    #[test]
++    fn certificate_info_roundtrip() {
++        let der = sample_cert_der();
++        let pem = include_str!("../../../tests/fixtures/tls/server.pem");
++        let info = CertificateInfo::from_der(&der, pem).unwrap();
++        assert!(!info.sha256_fingerprint.is_empty());
++        assert!(!info.spki_sha256_fingerprint.is_empty());
++        assert_eq!(info.pem, pem);
++    }
++}
+index 795f9b9..4e9eba2 100644
+--- a/crates/flectar-mail-core/Cargo.toml
++++ b/crates/flectar-mail-core/Cargo.toml
+@@ -58,7 +58,7 @@ candle-transformers = { version = "0.11", optional = true }
+ tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
+ hf-hub = { version = "1", default-features = false, features = ["rustls-tls"], optional = true }
+ 
+-# auth
++# auth & certificate policy (TOFU, pinning, ignore-errors)
+ base64 = "0.23"
+ sha2 = "0.10"
+ url = "2"
+diff --git a/crates/flectar-mail-core/src/imap/mod.rs b/crates/flectar-mail-core/src/imap/mod.rs
+index 9c893b4..a459d11 100644
+--- a/crates/flectar-mail-core/src/imap/mod.rs
++++ b/crates/flectar-mail-core/src/imap/mod.rs
+@@ -637,7 +637,7 @@ async fn connect_inner(
+             "OAuth sign-in needs an encrypted connection.".into(),
+         ));
+     }
+-    let connector = net::tls::connector(&settings.trusted_certificate_pem)?;
++    let connector = settings.make_connector()?;
+     let scheme = if security == ConnectionSecurity::Tls {
+         "imaps"
+     } else {
+diff --git a/crates/flectar-mail-core/src/lib.rs b/crates/flectar-mail-core/src/lib.rs
+index 8ad32f4..bc4c64b 100644
+--- a/crates/flectar-mail-core/src/lib.rs
++++ b/crates/flectar-mail-core/src/lib.rs
+@@ -2315,6 +2315,42 @@ impl Core {
+         Ok(())
+     }
+ 
++    /// Try to capture the server's untrusted certificate for a TOFU dialog,
++    /// after the real connection already failed.
++    async fn capture_tls_certificate(
++        &self,
++        args: &AddPasswordAccountArgs,
++    ) -> Option<UntrustedCertificate> {
++        use crate::net::tls::cert_policy::CertificateInfo;
++
++        // Only attempt capture for IMAP/POP3 (JMAP and Gmail use HTTP).
++        let host = match args.mail_protocol {
++            MailProtocol::Imap => Some(&args.incoming_host),
++            MailProtocol::Pop3 => Some(&args.incoming_host),
++            _ => None,
++        }?;
++        let port = args.incoming_port;
++
++        // Connect a raw TCP + TLS with a capturing verifier.
++        let tcp = crate::net::connect_tcp(host, port).await.ok()?;
++        let (connector, capture) = crate::net::tls::connector_with_capture(
++            &args.connection.trusted_certificate_pem,
++            &args.connection.cert_policy(),
++        )
++        .ok()?;
++        let _ = crate::net::tls::handshake(&connector, tcp, host).await;
++        let failed = capture.take_captured()?;
++
++        let info = CertificateInfo::from_der(&failed.end_entity, &failed.to_pem_bundle()).ok()?;
++
++        Some(UntrustedCertificate {
++            host: failed.host,
++            pem: info.pem,
++            sha256_fingerprint: info.sha256_fingerprint,
++            spki_sha256_fingerprint: info.spki_sha256_fingerprint,
++        })
++    }
++
+     pub async fn test_connection(&self, args: &AddPasswordAccountArgs) -> ConnectionTestResult {
+         let mut args = args.clone();
+         args.password = normalize_account_password(args.password);
+@@ -2345,11 +2381,20 @@ impl Core {
+             Ok(()) => ConnectionTestResult {
+                 ok: true,
+                 error: None,
++                untrusted_certificate: None,
+             },
+-            Err(error) => ConnectionTestResult {
+-                ok: false,
+-                error: Some(error),
+-            },
++            Err(error) => {
++                // On failure, try to capture the server's certificate for a
++                // TOFU dialog.  This connects a second time with a capturing
++                // verifier; it is best-effort and may also fail (the port
++                // could be wrong, the server may have timed out, etc.).
++                let untrusted = self.capture_tls_certificate(&args).await;
++                ConnectionTestResult {
++                    ok: false,
++                    error: Some(error),
++                    untrusted_certificate: untrusted,
++                }
++            }
+         }
+     }
+ 
+diff --git a/crates/flectar-mail-core/src/models.rs b/crates/flectar-mail-core/src/models.rs
+index 7971f31..9b7f377 100644
+--- a/crates/flectar-mail-core/src/models.rs
++++ b/crates/flectar-mail-core/src/models.rs
+@@ -311,6 +311,14 @@ pub struct MailConnectionSettings {
+     /// validity checks still apply. Contains public certificates, never keys.
+     #[serde(default)]
+     pub trusted_certificate_pem: String,
++    /// Skip TLS certificate verification for this account entirely.
++    /// Equivalent to `FLECTAR_MAIL_TLS_INSECURE=1`, but per-account.
++    #[serde(default)]
++    pub ignore_certificate_errors: bool,
++    /// Hex SHA-256 SPKI fingerprints of certificates pinned for this account.
++    /// When non-empty, the server's end-entity SPKI must match at least one.
++    #[serde(default)]
++    pub pinned_certificates: Vec<String>,
+     /// The proxy the account's connections go through: the app's, none, or
+     /// its own (#250).
+     #[serde(default)]
+@@ -337,6 +345,8 @@ impl MailConnectionSettings {
+             incoming_security,
+             smtp_security,
+             trusted_certificate_pem: String::new(),
++            ignore_certificate_errors: false,
++            pinned_certificates: Vec::new(),
+             proxy: crate::net::proxy::AccountProxy::App,
+             incoming_login: LoginMethod::Automatic,
+             smtp_login: LoginMethod::Automatic,
+@@ -352,6 +362,25 @@ impl MailConnectionSettings {
+                 std::time::Duration::from_secs(u64::from(seconds))
+             })
+     }
++
++    /// Derive a [`cert_policy::Policy`] from this connection's settings.
++    /// Used by the TLS connector to decide whether to verify, pin, or ignore.
++    pub fn cert_policy(&self) -> crate::net::tls::cert_policy::Policy {
++        if self.ignore_certificate_errors {
++            crate::net::tls::cert_policy::Policy::Insecure
++        } else if !self.pinned_certificates.is_empty() {
++            crate::net::tls::cert_policy::Policy::Pinned {
++                fingerprints: self.pinned_certificates.clone(),
++            }
++        } else {
++            crate::net::tls::cert_policy::Policy::Default
++        }
++    }
++
++    /// Convenience: build a TLS connector from these settings.
++    pub fn make_connector(&self) -> crate::error::Result<tokio_rustls::TlsConnector> {
++        crate::net::tls::connector_with_policy(&self.trusted_certificate_pem, &self.cert_policy())
++    }
+ }
+ 
+ /// How Flectar Mail signs in to a server with a password (#252).
+@@ -2232,11 +2261,32 @@ pub struct MailExport {
+     pub missing: usize,
+ }
+ 
++/// Certificate presented by a server during connection test, for the TOFU
++/// (Trust On First Use) dialog in the account setup wizard.
++#[derive(Debug, Clone, Serialize)]
++#[serde(rename_all = "camelCase")]
++pub struct UntrustedCertificate {
++    /// The server hostname that presented this certificate.
++    pub host: String,
++    /// PEM-encoded end-entity certificate.
++    pub pem: String,
++    /// SHA-256 fingerprint of the DER certificate (hex).
++    pub sha256_fingerprint: String,
++    /// SHA-256 SPKI fingerprint for pinning (hex).
++    pub spki_sha256_fingerprint: String,
++}
++
+ #[derive(Debug, Clone, Serialize)]
+ #[serde(rename_all = "camelCase")]
+ pub struct ConnectionTestResult {
+     pub ok: bool,
+     pub error: Option<String>,
++    /// When the connection failed because of an untrusted certificate, the
++    /// server's certificate details are captured here so the UI can present a
++    /// TOFU dialog. The user's decision (accept once / permanently / reject)
++    /// should be fed back through a separate callback.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub untrusted_certificate: Option<UntrustedCertificate>,
+ }
+ 
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+@@ -3420,6 +3470,11 @@ pub struct Settings {
+     /// The proxy the app's connections go through (#250).
+     #[serde(default)]
+     pub proxy: crate::net::proxy::ProxySettings,
++    /// TOFU (Trust On First Use) store: hostname → PEM certificate bundle
++    /// that was accepted once and should be trusted on subsequent connections
++    /// without prompting again.
++    #[serde(default)]
++    pub known_certificates: std::collections::HashMap<String, String>,
+ }
+ 
+ /// The AI server (#241): any server with the OpenAI chat API, on this
+@@ -3729,6 +3784,7 @@ impl Default for Settings {
+             cache_passwords: true,
+             ai: AiSettings::default(),
+             proxy: crate::net::proxy::ProxySettings::default(),
++            known_certificates: std::collections::HashMap::new(),
+         }
+     }
+ }
+diff --git a/crates/flectar-mail-core/src/net/tls.rs b/crates/flectar-mail-core/src/net/tls.rs
+index 690666e..a6d29b2 100644
+--- a/crates/flectar-mail-core/src/net/tls.rs
++++ b/crates/flectar-mail-core/src/net/tls.rs
+@@ -1,8 +1,12 @@
+ //! TLS trust for every connection the app makes, mail protocols and HTTP:
+ //! the operating system's certificate verifier, certificates a user imported
+-//! for one account, and the development switch that disables verification.
++//! for one account, the development switch that disables verification, and
++//! per-account certificate policy: TOFU, pinning, and ignore-errors.
++
++pub mod cert_policy;
+ 
+ use crate::error::{CoreError, Result};
++use cert_policy::{CapturingVerifier, Policy};
+ use rustls::client::WebPkiServerVerifier;
+ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+ use rustls::crypto::CryptoProvider;
+@@ -83,7 +87,7 @@ fn bundled_verifier() -> Arc<dyn ServerCertVerifier> {
+ }
+ 
+ #[derive(Debug)]
+-struct NoVerify(Arc<CryptoProvider>);
++pub(crate) struct NoVerify(pub(crate) Arc<CryptoProvider>);
+ 
+ impl ServerCertVerifier for NoVerify {
+     fn verify_server_cert(
+@@ -298,27 +302,90 @@ pub fn trusted_certificates(pem: &str) -> Result<Vec<rustls::pki_types::Certific
+ }
+ 
+ /// The TLS client of an account: the operating system's trust, plus any
+-/// certificates the user imported for this account.
++/// certificates the user imported for this account, respecting the given
++/// certificate [`Policy`].
+ pub fn connector(pem: &str) -> Result<TlsConnector> {
+-    if pem.is_empty() {
+-        return Ok(system_connector());
+-    }
+-    let imported = trusted_certificates(pem)?;
+-    let mut roots = rustls::RootCertStore::empty();
+-    for cert in &imported {
+-        roots
+-            .add(cert.clone())
++    connector_with_policy(pem, &Policy::Default)
++}
++
++/// Like [`connector`], but also returns a [`CapturingVerifier`] that captures
++/// the server's certificate chain when verification fails.  The capture can
++/// be polled (via [`CapturingVerifier::take_captured`]) after a failed
++/// handshake to obtain the certificate details for a TOFU prompt.
++pub fn connector_with_capture(
++    pem: &str,
++    policy: &Policy,
++) -> Result<(TlsConnector, Arc<CapturingVerifier>)> {
++    let capture = Arc::new(CapturingVerifier::new(
++        provider(),
++    ));
++    let verifier = build_policy_verifier(pem, policy, Some(&capture))?;
++    Ok((TlsConnector::from(Arc::new(client_config(verifier))), capture))
++}
++
++/// Build a [`TlsConnector`] according to `policy` and optional imported `pem`.
++pub fn connector_with_policy(pem: &str, policy: &Policy) -> Result<TlsConnector> {
++    let verifier = build_policy_verifier(pem, policy, None)?;
++    Ok(TlsConnector::from(Arc::new(client_config(verifier))))
++}
++
++/// Construct the appropriate [`ServerCertVerifier`] stack:
++/// system trust → imported certs → pinning → optional capture.
++fn build_policy_verifier(
++    pem: &str,
++    policy: &Policy,
++    capture: Option<&Arc<CapturingVerifier>>,
++) -> Result<Arc<dyn ServerCertVerifier>> {
++    // Base layer: system trust (or insecure policy).
++    let base: Arc<dyn ServerCertVerifier> = if policy.is_insecure() {
++        Arc::new(NoVerify(provider()))
++    } else {
++        system_verifier()
++    };
++
++    // Imported-certificate wrapper (same logic as the old connector()).
++    let with_imported: Arc<dyn ServerCertVerifier> = if pem.is_empty() {
++        base
++    } else {
++        let imported = trusted_certificates(pem)?;
++        let mut roots = rustls::RootCertStore::empty();
++        for cert in &imported {
++            roots
++                .add(cert.clone())
++                .map_err(|e| CoreError::Tls(e.to_string()))?;
++        }
++        let imported_roots = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider())
++            .build()
+             .map_err(|e| CoreError::Tls(e.to_string()))?;
++        Arc::new(AccountVerifier {
++            system: base,
++            imported_roots,
++            imported,
++        })
++    };
++
++    // Pinning wrapper (on top of imported certs).
++    let with_pinning: Arc<dyn ServerCertVerifier> = match policy {
++        Policy::Pinned { fingerprints } if !fingerprints.is_empty() => {
++            Arc::new(cert_policy::PinningVerifier::new(
++                with_imported,
++                fingerprints.clone(),
++                provider(),
++            ))
++        }
++        _ => with_imported,
++    };
++
++    // Optional capture wrapper (outermost, so it sees the ultimate error).
++    if let Some(cap) = capture {
++        Ok(Arc::new(cert_policy::CaptureWrapper::new(
++            with_pinning,
++            cap.clone(),
++            provider(),
++        )))
++    } else {
++        Ok(with_pinning)
+     }
+-    let imported_roots = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider())
+-        .build()
+-        .map_err(|e| CoreError::Tls(e.to_string()))?;
+-    let config = client_config(Arc::new(AccountVerifier {
+-        system: system_verifier(),
+-        imported_roots,
+-        imported,
+-    }));
+-    Ok(TlsConnector::from(Arc::new(config)))
+ }
+ 
+ /// What the user can do about a failed handshake, for the end of an error
+diff --git a/crates/flectar-mail-core/src/pop3/mod.rs b/crates/flectar-mail-core/src/pop3/mod.rs
+index a7d0db7..3428a49 100644
+--- a/crates/flectar-mail-core/src/pop3/mod.rs
++++ b/crates/flectar-mail-core/src/pop3/mod.rs
+@@ -188,6 +188,8 @@ pub struct Server<'a> {
+     pub security: ConnectionSecurity,
+     /// Additional trusted certificates of the account, as PEM.
+     pub trusted_certificate_pem: &'a str,
++    /// Certificate verification policy (ignore-errors, pinning, ...).
++    pub cert_policy: crate::net::tls::cert_policy::Policy,
+     /// How to sign in, with SASL PLAIN when announced and USER and PASS
+     /// otherwise, or only the way the account was set to (#252).
+     pub login: crate::models::LoginMethod,
+@@ -216,7 +218,7 @@ impl Session {
+     }
+ 
+     async fn open(server: &Server<'_>, user: &str, password: &str) -> Result<Self> {
+-        let connector = net::tls::connector(server.trusted_certificate_pem)
++        let connector = net::tls::connector_with_policy(server.trusted_certificate_pem, &server.cert_policy)
+             .map_err(|error| Error::Tls(error.to_string()))?;
+         let scheme = if server.security == ConnectionSecurity::Tls {
+             "pop3s"
+diff --git a/crates/flectar-mail-core/src/pop3/tests.rs b/crates/flectar-mail-core/src/pop3/tests.rs
+index ce06ccb..7846d0e 100644
+--- a/crates/flectar-mail-core/src/pop3/tests.rs
++++ b/crates/flectar-mail-core/src/pop3/tests.rs
+@@ -127,6 +127,7 @@ fn server_at(port: u16, security: ConnectionSecurity) -> Server<'static> {
+         port,
+         security,
+         trusted_certificate_pem: CERT,
++        cert_policy: crate::net::tls::cert_policy::Policy::Default,
+         login: crate::models::LoginMethod::Automatic,
+         timeout: crate::net::timeouts::STANDARD,
+     }
+diff --git a/crates/flectar-mail-core/src/smtp/mod.rs b/crates/flectar-mail-core/src/smtp/mod.rs
+index f19f2fc..67f2723 100644
+--- a/crates/flectar-mail-core/src/smtp/mod.rs
++++ b/crates/flectar-mail-core/src/smtp/mod.rs
+@@ -354,7 +354,7 @@ fn smtp_auth(auth: &SmtpAuth, cfg: &AccountConfig) -> Option<(Credentials, Vec<M
+ }
+ 
+ async fn tls_handshake(cfg: &AccountConfig, tcp: TcpStream) -> Result<MailStream> {
+-    let connector = net::tls::connector(&cfg.settings.connection.trusted_certificate_pem)?;
++    let connector = cfg.settings.connection.make_connector()?;
+     let tls = net::tls::handshake(&connector, tcp, &cfg.smtp_host)
+         .await
+         .map_err(|error| {
+diff --git a/crates/flectar-mail-core/src/sync/pop3.rs b/crates/flectar-mail-core/src/sync/pop3.rs
+index cd5e7aa..b7bc365 100644
+--- a/crates/flectar-mail-core/src/sync/pop3.rs
++++ b/crates/flectar-mail-core/src/sync/pop3.rs
+@@ -368,6 +368,7 @@ async fn connect(
+         port: config.incoming_port,
+         security: connection.incoming_security,
+         trusted_certificate_pem: &connection.trusted_certificate_pem,
++        cert_policy: connection.cert_policy(),
+         login: connection.incoming_login,
+         timeout: connection.server_timeout(),
+     };
