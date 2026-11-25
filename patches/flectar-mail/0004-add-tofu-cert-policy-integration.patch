@@ -1,0 +1,1499 @@
+diff --git a/crates/flectar-mail-core/src/imap/mod.rs b/crates/flectar-mail-core/src/imap/mod.rs
+index d2f8c39..c3124ac 100644
+--- a/crates/flectar-mail-core/src/imap/mod.rs
++++ b/crates/flectar-mail-core/src/imap/mod.rs
+@@ -596,7 +596,8 @@ pub async fn connect_with_settings(
+     creds: ImapCredentials,
+     settings: &crate::models::MailConnectionSettings,
+ ) -> Result<Session> {
+-    connect_as(net::proxy::Owner::App, host, port, creds, settings).await
++    let empty_tofu = HashMap::new();
++    connect_as(net::proxy::Owner::App, host, port, creds, settings, &empty_tofu).await
+ }
+ 
+ /// Connect as `settings` say, through the proxy of `owner`.
+@@ -606,13 +607,14 @@ pub async fn connect_as(
+     port: u16,
+     creds: ImapCredentials,
+     settings: &crate::models::MailConnectionSettings,
++    tofu: &HashMap<String, String>,
+ ) -> Result<Session> {
+     // Bound the whole handshake so a silent stall (server never sends the
+     // greeting, or an AUTHENTICATE that never gets a tagged response) surfaces
+     // as an error instead of hanging the sync actor forever.
+     const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+     let timeout = net::timeouts::stretch(CONNECT_TIMEOUT, settings.server_timeout());
+-    tokio::time::timeout(timeout, connect_inner(owner, host, port, creds, settings))
++    tokio::time::timeout(timeout, connect_inner(owner, host, port, creds, settings, tofu))
+         .await
+         .map_err(|_| {
+             tracing::warn!(%host, port, seconds = timeout.as_secs(), "imap connect: timed out");
+@@ -629,6 +631,7 @@ async fn connect_inner(
+     port: u16,
+     creds: ImapCredentials,
+     settings: &crate::models::MailConnectionSettings,
++    tofu: &HashMap<String, String>,
+ ) -> Result<Session> {
+     use crate::models::ConnectionSecurity;
+     let security = settings.incoming_security;
+@@ -637,7 +640,7 @@ async fn connect_inner(
+             "OAuth sign-in needs an encrypted connection.".into(),
+         ));
+     }
+-    let connector = settings.make_connector()?;
++    let connector = settings.make_connector(tofu)?;
+     let scheme = if security == ConnectionSecurity::Tls {
+         "imaps"
+     } else {
+diff --git a/crates/flectar-mail-core/src/lib.rs b/crates/flectar-mail-core/src/lib.rs
+index 8955939..60c66c9 100644
+--- a/crates/flectar-mail-core/src/lib.rs
++++ b/crates/flectar-mail-core/src/lib.rs
+@@ -447,7 +447,7 @@ fn password_account_config(args: &AddPasswordAccountArgs, id: i64) -> AccountCon
+     }
+ }
+ 
+-async fn check_smtp(args: &AddPasswordAccountArgs, id: i64) -> Result<()> {
++async fn check_smtp(args: &AddPasswordAccountArgs, id: i64, tofu: &HashMap<String, String>) -> Result<()> {
+     // An account that only receives mail has no SMTP server to try.
+     if args.smtp_host.is_empty() {
+         return Ok(());
+@@ -461,7 +461,7 @@ async fn check_smtp(args: &AddPasswordAccountArgs, id: i64) -> Result<()> {
+                 .unwrap_or_else(|| args.password.clone()),
+         )
+     };
+-    smtp::test_connection(&password_account_config(args, id), &auth).await
++    smtp::test_connection(&password_account_config(args, id), &auth, tofu).await
+ }
+ 
+ /// The setup check signed in, so the first sync respects the server's
+@@ -497,6 +497,43 @@ fn local_mail_has_no_server() -> CoreError {
+ /// alias username with a bare AUTHENTICATIONFAILED, which reads as a broken
+ /// app. Lead with the app-specific password and full-address username iCloud
+ /// needs, keeping the server's response for reference.
++/// Try to capture the server's untrusted certificate by connecting a second
++/// time with a capturing verifier. Returns the PEM bundle and fingerprint on
++/// success.
++async fn capture_untrusted_certificate(
++    args: &AddPasswordAccountArgs,
++    tofu: &HashMap<String, String>,
++) -> Option<UntrustedCertificate> {
++    use crate::net::tls::cert_policy::CertificateInfo;
++
++    // Only attempt capture for IMAP/POP3 (JMAP and Gmail use HTTP).
++    let host = match args.mail_protocol {
++        MailProtocol::Imap => Some(&args.incoming_host),
++        MailProtocol::Pop3 => Some(&args.incoming_host),
++        _ => None,
++    }?;
++    let port = args.incoming_port;
++
++    let tcp = crate::net::connect_tcp(host, port).await.ok()?;
++    let (connector, capture) = crate::net::tls::connector_with_capture(
++        &args.connection.trusted_certificate_pem,
++        tofu,
++        &args.connection.cert_policy(),
++    )
++    .ok()?;
++    let _ = crate::net::tls::handshake(&connector, tcp, host).await;
++    let failed = capture.take_captured()?;
++
++    let info = CertificateInfo::from_der(&failed.end_entity, &failed.to_pem_bundle()).ok()?;
++
++    Some(UntrustedCertificate {
++        host: failed.host,
++        pem: info.pem,
++        sha256_fingerprint: info.sha256_fingerprint,
++        spki_sha256_fingerprint: info.spki_sha256_fingerprint,
++    })
++}
++
+ fn explain_imap_sign_in(args: &AddPasswordAccountArgs, error: CoreError) -> CoreError {
+     match error {
+         CoreError::Auth(detail) if is_apple_mailbox(&args.email, &args.incoming_host) => {
+@@ -2327,43 +2364,28 @@ impl Core {
+ 
+     /// Try to capture the server's untrusted certificate for a TOFU dialog,
+     /// after the real connection already failed.
+-    async fn capture_tls_certificate(
++    pub async fn capture_tls_certificate(
+         &self,
+-        args: &AddPasswordAccountArgs,
++        args: AddPasswordAccountArgs,
+     ) -> Option<UntrustedCertificate> {
+-        use crate::net::tls::cert_policy::CertificateInfo;
+-
+-        // Only attempt capture for IMAP/POP3 (JMAP and Gmail use HTTP).
+-        let host = match args.mail_protocol {
+-            MailProtocol::Imap => Some(&args.incoming_host),
+-            MailProtocol::Pop3 => Some(&args.incoming_host),
+-            _ => None,
+-        }?;
+-        let port = args.incoming_port;
+-
+-        // Connect a raw TCP + TLS with a capturing verifier.
+-        let tcp = crate::net::connect_tcp(host, port).await.ok()?;
+-        let (connector, capture) = crate::net::tls::connector_with_capture(
+-            &args.connection.trusted_certificate_pem,
+-            &args.connection.cert_policy(),
+-        )
+-        .ok()?;
+-        let _ = crate::net::tls::handshake(&connector, tcp, host).await;
+-        let failed = capture.take_captured()?;
+-
+-        let info = CertificateInfo::from_der(&failed.end_entity, &failed.to_pem_bundle()).ok()?;
+-
+-        Some(UntrustedCertificate {
+-            host: failed.host,
+-            pem: info.pem,
+-            sha256_fingerprint: info.sha256_fingerprint,
+-            spki_sha256_fingerprint: info.spki_sha256_fingerprint,
+-        })
++        let tofu = self
++            .get_settings()
++            .await
++            .ok()
++            .map(|s| s.known_certificates.clone())
++            .unwrap_or_default();
++        capture_untrusted_certificate(&args, &tofu).await
+     }
+ 
+     pub async fn test_connection(&self, args: &AddPasswordAccountArgs) -> ConnectionTestResult {
+         let mut args = args.clone();
+         args.password = normalize_account_password(args.password);
++        let tofu: HashMap<String, String> = self
++            .get_settings()
++            .await
++            .ok()
++            .map(|s| s.known_certificates.clone())
++            .unwrap_or_default();
+         let result = match args.mail_protocol {
+             MailProtocol::Jmap => crate::jmap::client::connect_with(
+                 &args.email,
+@@ -2376,11 +2398,11 @@ impl Core {
+             .map(|_| ())
+             .map_err(|error| error.to_client_json()),
+             MailProtocol::Imap => self
+-                .check_imap_smtp(&mut args, 0)
++                .check_imap_smtp(&mut args, 0, &tofu)
+                 .await
+                 .map_err(|error| error.to_string()),
+             MailProtocol::Pop3 => self
+-                .check_pop3_smtp(&mut args, 0)
++                .check_pop3_smtp(&mut args, 0, &tofu)
+                 .await
+                 .map(drop)
+                 .map_err(|error| error.to_string()),
+@@ -2398,7 +2420,7 @@ impl Core {
+                 // TOFU dialog.  This connects a second time with a capturing
+                 // verifier; it is best-effort and may also fail (the port
+                 // could be wrong, the server may have timed out, etc.).
+-                let untrusted = self.capture_tls_certificate(&args).await;
++                let untrusted = self.capture_tls_certificate(args.clone()).await;
+                 ConnectionTestResult {
+                     ok: false,
+                     error: Some(error),
+@@ -2409,8 +2431,14 @@ impl Core {
+     }
+ 
+     /// Checks the servers of a new account, or of account `id` being edited.
+-    async fn check_imap_smtp(&self, args: &mut AddPasswordAccountArgs, id: i64) -> Result<()> {
++    async fn check_imap_smtp(
++        &self,
++        args: &mut AddPasswordAccountArgs,
++        id: i64,
++        tofu: &HashMap<String, String>,
++    ) -> Result<()> {
+         let owner = password_account_config(args, id).proxy_owner();
++        let tofu = tofu.clone();
+         let mut session = with_username_fallback(
+             args,
+             owner,
+@@ -2425,6 +2453,7 @@ impl Core {
+                     args.incoming_port,
+                     creds,
+                     &args.connection,
++                    &tofu,
+                 )
+                 .await
+             },
+@@ -2434,7 +2463,7 @@ impl Core {
+         let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
+         imap::logout(session).await;
+         mailbox_result?;
+-        check_smtp(args, id).await
++        check_smtp(args, id, &tofu).await
+     }
+ 
+     /// Returns what the POP3 server announced, which the first sync has to
+@@ -2443,13 +2472,15 @@ impl Core {
+         &self,
+         args: &mut AddPasswordAccountArgs,
+         id: i64,
++        tofu: &HashMap<String, String>,
+     ) -> Result<sync::pop3::Probe> {
++        let tofu = tofu.clone();
+         let probe =
+             with_username_fallback(args, id, async |args: &AddPasswordAccountArgs, id: i64| {
+-                sync::pop3::probe(&password_account_config(args, id), &args.password).await
++                sync::pop3::probe(&password_account_config(args, id), &args.password, &tofu).await
+             })
+             .await?;
+-        check_smtp(args, id).await?;
++        check_smtp(args, id, &tofu).await?;
+         Ok(probe)
+     }
+ 
+@@ -2614,6 +2645,15 @@ impl Core {
+         let mut pop3_probe = None;
+         // The checks wait as long as the account's server timeout says (#252).
+         let server_timeout = args.connection.server_timeout();
++
++        // --- TOFU: known certificates from the global settings ---
++        let mut tofu: HashMap<String, String> = self
++            .get_settings()
++            .await
++            .ok()
++            .map(|s| s.known_certificates.clone())
++            .unwrap_or_default();
++
+         let jmap_account_id = match args.mail_protocol {
+             MailProtocol::Jmap => Some(
+                 net::timeouts::scope(
+@@ -2631,18 +2671,20 @@ impl Core {
+                 .account_id,
+             ),
+             MailProtocol::Imap => {
+-                net::timeouts::scope(server_timeout, self.check_imap_smtp(&mut args, checked_as))
+-                    .await?;
++                net::timeouts::scope(
++                    server_timeout,
++                    self.check_imap_smtp(&mut args, checked_as, &tofu),
++                )
++                .await?;
+                 None
+             }
+             MailProtocol::Pop3 => {
+-                pop3_probe = Some(
+-                    net::timeouts::scope(
+-                        server_timeout,
+-                        self.check_pop3_smtp(&mut args, checked_as),
+-                    )
+-                    .await?,
+-                );
++                let probe = net::timeouts::scope(
++                    server_timeout,
++                    self.check_pop3_smtp(&mut args, checked_as, &tofu),
++                )
++                .await?;
++                pop3_probe = Some(probe);
+                 None
+             }
+             MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
+@@ -5835,12 +5877,14 @@ impl Core {
+                 access_token: self.tokens.access_token(config.id, config.provider).await?,
+             },
+         };
++        let empty_tofu = HashMap::new();
+         imap::connect_as(
+             config.proxy_owner(),
+             &config.incoming_host,
+             config.incoming_port,
+             credentials,
+             &config.settings.connection,
++            &empty_tofu,
+         )
+         .await
+     }
+diff --git a/crates/flectar-mail-core/src/models.rs b/crates/flectar-mail-core/src/models.rs
+index 780f243..58e7d03 100644
+--- a/crates/flectar-mail-core/src/models.rs
++++ b/crates/flectar-mail-core/src/models.rs
+@@ -378,8 +378,18 @@ impl MailConnectionSettings {
+     }
+ 
+     /// Convenience: build a TLS connector from these settings.
+-    pub fn make_connector(&self) -> crate::error::Result<tokio_rustls::TlsConnector> {
+-        crate::net::tls::connector_with_policy(&self.trusted_certificate_pem, &self.cert_policy())
++    ///
++    /// `tofu` is the global TOFU store (hostname → PEM bundle) from
++    /// [`Settings::known_certificates`].
++    pub fn make_connector(
++        &self,
++        tofu: &std::collections::HashMap<String, String>,
++    ) -> crate::error::Result<tokio_rustls::TlsConnector> {
++        crate::net::tls::connector_with_policy(
++            &self.trusted_certificate_pem,
++            tofu,
++            &self.cert_policy(),
++        )
+     }
+ }
+ 
+diff --git a/crates/flectar-mail-core/src/net/tls.rs b/crates/flectar-mail-core/src/net/tls.rs
+index 05eae2d..325b05e 100644
+--- a/crates/flectar-mail-core/src/net/tls.rs
++++ b/crates/flectar-mail-core/src/net/tls.rs
+@@ -7,6 +7,7 @@ pub mod cert_policy;
+ 
+ use crate::error::{CoreError, Result};
+ use cert_policy::{CapturingVerifier, Policy};
++use std::collections::HashMap;
+ use rustls::client::WebPkiServerVerifier;
+ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+ use rustls::crypto::CryptoProvider;
+@@ -305,7 +306,7 @@ pub fn trusted_certificates(pem: &str) -> Result<Vec<rustls::pki_types::Certific
+ /// certificates the user imported for this account, respecting the given
+ /// certificate [`Policy`].
+ pub fn connector(pem: &str) -> Result<TlsConnector> {
+-    connector_with_policy(pem, &Policy::Default)
++    connector_with_policy(pem, &HashMap::new(), &Policy::Default)
+ }
+ 
+ /// Like [`connector`], but also returns a [`CapturingVerifier`] that captures
+@@ -314,25 +315,34 @@ pub fn connector(pem: &str) -> Result<TlsConnector> {
+ /// handshake to obtain the certificate details for a TOFU prompt.
+ pub fn connector_with_capture(
+     pem: &str,
++    tofu: &HashMap<String, String>,
+     policy: &Policy,
+ ) -> Result<(TlsConnector, Arc<CapturingVerifier>)> {
+     let capture = Arc::new(CapturingVerifier::new(
+         provider(),
+     ));
+-    let verifier = build_policy_verifier(pem, policy, Some(&capture))?;
++    let verifier = build_policy_verifier(pem, tofu, policy, Some(&capture))?;
+     Ok((TlsConnector::from(Arc::new(client_config(verifier))), capture))
+ }
+ 
+-/// Build a [`TlsConnector`] according to `policy` and optional imported `pem`.
+-pub fn connector_with_policy(pem: &str, policy: &Policy) -> Result<TlsConnector> {
+-    let verifier = build_policy_verifier(pem, policy, None)?;
++/// Build a [`TlsConnector`] according to `policy`, optional imported `pem`,
++/// and the global TOFU store.
++pub fn connector_with_policy(
++    pem: &str,
++    tofu: &HashMap<String, String>,
++    policy: &Policy,
++) -> Result<TlsConnector> {
++    let verifier = build_policy_verifier(pem, tofu, policy, None)?;
+     Ok(TlsConnector::from(Arc::new(client_config(verifier))))
+ }
+ 
+ /// Construct the appropriate [`ServerCertVerifier`] stack:
+-/// system trust → imported certs → pinning → optional capture.
++/// system trust → imported certs + TOFU → pinning → optional capture.
++///
++/// `tofu` certificates are appended to the imported roots, keyed by hostname.
+ fn build_policy_verifier(
+     pem: &str,
++    tofu: &HashMap<String, String>,
+     policy: &Policy,
+     capture: Option<&Arc<CapturingVerifier>>,
+ ) -> Result<Arc<dyn ServerCertVerifier>> {
+@@ -343,11 +353,22 @@ fn build_policy_verifier(
+         system_verifier()
+     };
+ 
+-    // Imported-certificate wrapper (same logic as the old connector()).
+-    let with_imported: Arc<dyn ServerCertVerifier> = if pem.is_empty() {
++    // Imported-certificate wrapper: user-imported PEM + TOFU store.
++    let with_imported: Arc<dyn ServerCertVerifier> = if pem.is_empty() && tofu.is_empty() {
+         base
+     } else {
+-        let imported = trusted_certificates(pem)?;
++        let mut all_pem = String::new();
++        all_pem.push_str(pem);
++        for (_host, bundle) in tofu {
++            if !bundle.trim().is_empty() {
++                all_pem.push('\n');
++                all_pem.push_str(bundle);
++                all_pem.push('\n');
++            }
++        }
++        let combined = all_pem;
++
++        let imported = trusted_certificates(&combined)?;
+         let mut roots = rustls::RootCertStore::empty();
+         for cert in &imported {
+             roots
+diff --git a/crates/flectar-mail-core/src/pop3/mod.rs b/crates/flectar-mail-core/src/pop3/mod.rs
+index 3428a49..e46f314 100644
+--- a/crates/flectar-mail-core/src/pop3/mod.rs
++++ b/crates/flectar-mail-core/src/pop3/mod.rs
+@@ -18,6 +18,7 @@ use crate::models::ConnectionSecurity;
+ use crate::net::{self, MailStream};
+ use base64::Engine as _;
+ use response::Status;
++use std::collections::HashMap;
+ use std::time::Duration;
+ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+ use tokio::net::TcpStream;
+@@ -190,6 +191,8 @@ pub struct Server<'a> {
+     pub trusted_certificate_pem: &'a str,
+     /// Certificate verification policy (ignore-errors, pinning, ...).
+     pub cert_policy: crate::net::tls::cert_policy::Policy,
++    /// Global TOFU store (hostname → PEM).
++    pub tofu: &'a HashMap<String, String>,
+     /// How to sign in, with SASL PLAIN when announced and USER and PASS
+     /// otherwise, or only the way the account was set to (#252).
+     pub login: crate::models::LoginMethod,
+@@ -218,7 +221,7 @@ impl Session {
+     }
+ 
+     async fn open(server: &Server<'_>, user: &str, password: &str) -> Result<Self> {
+-        let connector = net::tls::connector_with_policy(server.trusted_certificate_pem, &server.cert_policy)
++        let connector = net::tls::connector_with_policy(server.trusted_certificate_pem, server.tofu, &server.cert_policy)
+             .map_err(|error| Error::Tls(error.to_string()))?;
+         let scheme = if server.security == ConnectionSecurity::Tls {
+             "pop3s"
+diff --git a/crates/flectar-mail-core/src/pop3/tests.rs b/crates/flectar-mail-core/src/pop3/tests.rs
+index 7846d0e..94dc7e5 100644
+--- a/crates/flectar-mail-core/src/pop3/tests.rs
++++ b/crates/flectar-mail-core/src/pop3/tests.rs
+@@ -128,6 +128,7 @@ fn server_at(port: u16, security: ConnectionSecurity) -> Server<'static> {
+         security,
+         trusted_certificate_pem: CERT,
+         cert_policy: crate::net::tls::cert_policy::Policy::Default,
++        tofu: &std::collections::HashMap::new(),
+         login: crate::models::LoginMethod::Automatic,
+         timeout: crate::net::timeouts::STANDARD,
+     }
+diff --git a/crates/flectar-mail-core/src/sieve/managesieve.rs b/crates/flectar-mail-core/src/sieve/managesieve.rs
+index 7fa7abc..adfadc7 100644
+--- a/crates/flectar-mail-core/src/sieve/managesieve.rs
++++ b/crates/flectar-mail-core/src/sieve/managesieve.rs
+@@ -169,7 +169,11 @@ impl Session {
+     }
+ 
+     async fn start(server: &Server<'_>) -> Result<Self> {
+-        let connector = net::tls::connector(server.trusted_certificate_pem)
++        let connector = net::tls::connector_with_policy(
++                server.trusted_certificate_pem,
++                &std::collections::HashMap::new(),
++                &net::tls::cert_policy::Policy::Default,
++            )
+             .map_err(|error| Error::Tls(error.to_string()))?;
+         let tcp = net::proxy::connect_for(server.owner, "sieve", server.host, server.port).await?;
+         let stream = match server.security {
+diff --git a/crates/flectar-mail-core/src/smtp/mod.rs b/crates/flectar-mail-core/src/smtp/mod.rs
+index 1bde3ef..afe41bf 100644
+--- a/crates/flectar-mail-core/src/smtp/mod.rs
++++ b/crates/flectar-mail-core/src/smtp/mod.rs
+@@ -14,6 +14,7 @@ use lettre::transport::smtp::{
+     extension::{ClientId, Extension, MailBodyParameter, MailParameter},
+     response::Severity,
+ };
++use std::collections::HashMap;
+ use std::{
+     fmt,
+     future::Future,
+@@ -404,8 +405,8 @@ fn smtp_auth(auth: &SmtpAuth, cfg: &AccountConfig) -> Option<(Credentials, Vec<M
+     }
+ }
+ 
+-async fn tls_handshake(cfg: &AccountConfig, tcp: TcpStream) -> Result<MailStream> {
+-    let connector = cfg.settings.connection.make_connector()?;
++async fn tls_handshake(cfg: &AccountConfig, tcp: TcpStream, tofu: &HashMap<String, String>) -> Result<MailStream> {
++    let connector = cfg.settings.connection.make_connector(tofu)?;
+     let tls = net::tls::handshake(&connector, tcp, &cfg.smtp_host)
+         .await
+         .map_err(|error| {
+@@ -421,7 +422,7 @@ async fn tls_handshake(cfg: &AccountConfig, tcp: TcpStream) -> Result<MailStream
+ 
+ /// Upgrade with STARTTLS before lettre takes over. A server that does not
+ /// offer the upgrade is never sent credentials.
+-async fn start_tls(cfg: &AccountConfig, mut tcp: TcpStream) -> Result<MailStream> {
++async fn start_tls(cfg: &AccountConfig, mut tcp: TcpStream, tofu: &HashMap<String, String>) -> Result<MailStream> {
+     let greeting = read_smtp_response(&mut tcp, "greeting").await?;
+     expect_smtp_status(&greeting, "220", "greeting")?;
+     tcp.write_all(format!("EHLO {EHLO_DOMAIN}\r\n").as_bytes())
+@@ -444,7 +445,7 @@ async fn start_tls(cfg: &AccountConfig, mut tcp: TcpStream) -> Result<MailStream
+         .map_err(|error| CoreError::Smtp(format!("SMTP STARTTLS: {error}")))?;
+     let response = read_smtp_response(&mut tcp, "STARTTLS").await?;
+     expect_smtp_status(&response, "220", "STARTTLS")?;
+-    tls_handshake(cfg, tcp).await
++    tls_handshake(cfg, tcp, tofu).await
+ }
+ 
+ /// Open an authenticated SMTP session as the account's security requires.
+@@ -452,6 +453,17 @@ async fn connect(
+     cfg: &AccountConfig,
+     auth: &SmtpAuth,
+     gate: Arc<Gate>,
++) -> Result<AsyncSmtpConnection> {
++    connect_with_tofu(cfg, auth, gate, &HashMap::new()).await // TODO: plumb TOFU
++}
++
++/// Open an authenticated SMTP session as the account's security requires,
++/// with an explicit TOFU store.
++async fn connect_with_tofu(
++    cfg: &AccountConfig,
++    auth: &SmtpAuth,
++    gate: Arc<Gate>,
++    tofu: &HashMap<String, String>,
+ ) -> Result<AsyncSmtpConnection> {
+     let security = cfg.settings.connection.smtp_security;
+     if !security.is_encrypted() && matches!(auth, SmtpAuth::XOAuth2(_)) {
+@@ -474,9 +486,9 @@ async fn connect(
+                 ))
+             })?;
+         let (stream, greeting) = match security {
+-            ConnectionSecurity::Tls => (tls_handshake(cfg, tcp).await?, b"".as_slice()),
++            ConnectionSecurity::Tls => (tls_handshake(cfg, tcp, tofu).await?, b"".as_slice()),
+             ConnectionSecurity::Starttls => (
+-                start_tls(cfg, tcp).await?,
++                start_tls(cfg, tcp, tofu).await?,
+                 b"220 Flectar STARTTLS ready\r\n".as_slice(),
+             ),
+             ConnectionSecurity::None => (MailStream::Plain(tcp), b"".as_slice()),
+@@ -755,9 +767,9 @@ async fn submit(
+ }
+ 
+ /// Cheap connectivity/auth probe used by test_connection.
+-pub async fn test_connection(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<()> {
++pub async fn test_connection(cfg: &AccountConfig, auth: &SmtpAuth, tofu: &HashMap<String, String>) -> Result<()> {
+     let gate = Gate::until(None, cfg.settings.connection.server_timeout(), None);
+-    let mut connection = connect(cfg, auth, gate).await?;
++    let mut connection = connect_with_tofu(cfg, auth, gate, tofu).await?;
+     connection
+         .command(Noop)
+         .await
+diff --git a/crates/flectar-mail-core/src/sync/engine.rs b/crates/flectar-mail-core/src/sync/engine.rs
+index 29b6bc0..674c406 100644
+--- a/crates/flectar-mail-core/src/sync/engine.rs
++++ b/crates/flectar-mail-core/src/sync/engine.rs
+@@ -1832,12 +1832,14 @@ pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Ses
+     crate::events::sync_diagnostic("imap_credentials", Some(config.id), "loading");
+     let creds = imap_credentials(ctx, config).await?;
+     crate::events::sync_diagnostic("imap_connect", Some(config.id), "connecting");
++    let empty_tofu = HashMap::new();
+     match imap::connect_as(
+         config.proxy_owner(),
+         &config.incoming_host,
+         config.incoming_port,
+         creds,
+         &config.settings.connection,
++        &empty_tofu,
+     )
+     .await
+     {
+@@ -1862,6 +1864,7 @@ pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Ses
+                 config.incoming_port,
+                 creds,
+                 &config.settings.connection,
++                &empty_tofu,
+             )
+             .await
+         }
+diff --git a/crates/flectar-mail-core/src/sync/pop3.rs b/crates/flectar-mail-core/src/sync/pop3.rs
+index b7bc365..a6ec0d7 100644
+--- a/crates/flectar-mail-core/src/sync/pop3.rs
++++ b/crates/flectar-mail-core/src/sync/pop3.rs
+@@ -360,6 +360,7 @@ async fn load_password(
+ async fn connect(
+     config: &AccountConfig,
+     password: &str,
++    tofu: &HashMap<String, String>,
+ ) -> std::result::Result<pop3::Session, Failure> {
+     let connection = &config.settings.connection;
+     let server = pop3::Server {
+@@ -369,6 +370,7 @@ async fn connect(
+         security: connection.incoming_security,
+         trusted_certificate_pem: &connection.trusted_certificate_pem,
+         cert_policy: connection.cert_policy(),
++        tofu,
+         login: connection.incoming_login,
+         timeout: connection.server_timeout(),
+     };
+@@ -387,8 +389,8 @@ pub(crate) struct Probe {
+ 
+ /// Sign in and make sure the server can tell its messages apart, which
+ /// downloading each message once depends on.
+-pub(crate) async fn probe(config: &AccountConfig, password: &str) -> Result<Probe> {
+-    let mut session = connect(config, password)
++pub(crate) async fn probe(config: &AccountConfig, password: &str, tofu: &HashMap<String, String>) -> Result<Probe> {
++    let mut session = connect(config, password, tofu)
+         .await
+         .map_err(Failure::into_error)?;
+     let signed_in_at = now_ms();
+@@ -445,7 +447,8 @@ async fn sync(
+         return Ok(Synced::NotBefore(at));
+     }
+     let password = load_password(ctx, config).await?;
+-    let mut session = connect(config, &password).await?;
++    let empty_tofu = std::collections::HashMap::new();
++    let mut session = connect(config, &password, &empty_tofu).await?;
+     set_state(ctx, account_id, "syncing").await;
+     let signed_in_at = now_ms();
+     let capabilities = session.capabilities().clone();
+@@ -998,7 +1001,8 @@ async fn restore(ctx: &SyncCtx, config: &AccountConfig, message_id: i64) -> Resu
+     let password = load_password(ctx, config)
+         .await
+         .map_err(Failure::into_error)?;
+-    let mut session = connect(config, &password)
++    let empty_tofu = std::collections::HashMap::new();
++    let mut session = connect(config, &password, &empty_tofu)
+         .await
+         .map_err(Failure::into_error)?;
+     let signed_in_at = now_ms();
+diff --git a/src/data_controller.rs b/src/data_controller.rs
+index 991eb4d..61e4e19 100644
+--- a/src/data_controller.rs
++++ b/src/data_controller.rs
+@@ -1599,6 +1599,7 @@ pub(super) fn register_data_management_callbacks(
+                             finishes_account_setup: false,
+                             finishes_oauth: false,
+                             close_to_tray: None,
++                            show_cert_dialog: None,
+                         })
+                         .await;
+                 });
+diff --git a/src/mail.rs b/src/mail.rs
+index c5174e8..8063c30 100644
+--- a/src/mail.rs
++++ b/src/mail.rs
+@@ -15,7 +15,7 @@ use flectar_mail_core::{
+         PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult, RsvpEventArgs,
+         SaveDraftArgs, ScheduledSend, SearchCursor, SenderIdentity, ServerRules, ServerRulesAnswer,
+         ServerSearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, UnsubscribeOffer,
+-        UnsubscribeOutcome, View, normalized_workspace_list_pane_width, roles,
++        UnsubscribeOutcome, UntrustedCertificate, View, normalized_workspace_list_pane_width, roles,
+     },
+ };
+ #[cfg(test)]
+@@ -3118,6 +3118,15 @@ impl CoreMailSource {
+             .map_err(|error| error.to_string())
+     }
+ 
++    /// Try to capture the server's untrusted TLS certificate after a failed
++    /// connection, for the TOFU verification dialog.
++    pub async fn capture_tls_certificate(
++        &self,
++        args: AddPasswordAccountArgs,
++    ) -> Option<UntrustedCertificate> {
++        self.core.capture_tls_certificate(args).await
++    }
++
+     pub async fn start_oauth_with_calendar<F>(
+         &self,
+         provider: Provider,
+diff --git a/src/main.rs b/src/main.rs
+index 1adee47..953a262 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -173,7 +173,8 @@ use flectar_mail_core::models::{
+     Account, AccountConfig, AddPasswordAccountArgs, CalendarConnection, CardDavConnection,
+     CheckInterval, ConnectionSecurity, ContactRecord, ContactRecordCursor, ContactRecordPage,
+     CreateEventArgs, DraftAttachmentIn, Label, ListOrder, LoginMethod, MailConnectionSettings,
+-    MailGrouping, MailProfile, MailProtocol, Provider, Settings, Snippet, UpdateEventArgs,
++    MailGrouping, MailProfile, MailProtocol, Provider, Settings, Snippet, UntrustedCertificate,
++    UpdateEventArgs,
+ };
+ #[cfg(test)]
+ use mail::fixture_messages;
+@@ -215,6 +216,33 @@ use ui_message::{AppWindowMessages, UiMessage, translated};
+ use window_controller::{
+     create_and_register_window_lifecycle, register_window_preference_callbacks,
+ };
++use tokio::sync::oneshot;
++
++/// User decision from the certificate-verification dialog.
++#[allow(dead_code)]
++enum CertDecision {
++    AcceptOnce,
++    AcceptAlways,
++    Pin,
++    Reject,
++}
++
++/// When account setup encounters an untrusted TLS certificate, the probe
++/// stores its state here so the cert-verification dialog callbacks can
++/// continue the flow.
++#[allow(dead_code)]
++struct PendingCertAccount {
++    core: CoreMailSource,
++    args: AddPasswordAccountArgs,
++    cert: UntrustedCertificate,
++    updates: UiSender<UiTaskUpdate>,
++    /// Send the user's decision back to the waiting probe task.
++    decision_tx: oneshot::Sender<CertDecision>,
++}
++
++#[allow(dead_code)]
++static PENDING_CERT_ACCOUNT: std::sync::Mutex<Option<PendingCertAccount>> =
++    std::sync::Mutex::new(None);
+ 
+ const PAGE_SIZE: usize = 25;
+ const FAVICON_CONCURRENCY: usize = 4;
+@@ -574,6 +602,9 @@ struct UiTaskUpdate {
+     finishes_account_setup: bool,
+     finishes_oauth: bool,
+     close_to_tray: Option<bool>,
++    /// When set, the account-setup flow detected an untrusted TLS certificate
++    /// and the certificate-verification dialog should be shown.
++    show_cert_dialog: Option<UntrustedCertificate>,
+ }
+ 
+ #[derive(Clone, Default)]
+@@ -5160,6 +5191,20 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+             if update.finishes_account_setup {
+                 app.set_account_setup_in_progress(false);
+             }
++            if let Some(cert) = &update.show_cert_dialog {
++                let ui = app.global::<CertVerification>();
++                ui.set_host(cert.host.clone().into());
++                ui.set_sha256_fingerprint(cert.sha256_fingerprint.clone().into());
++                ui.set_spki_fingerprint(cert.spki_sha256_fingerprint.clone().into());
++                ui.set_pem(cert.pem.clone().into());
++                ui.set_problems(
++                    "The server's TLS certificate could not be verified against any known\
++                     certificate authority. Verify the fingerprints above with your\
++                     server administrator."
++                        .into(),
++                );
++                ui.set_visible(true);
++            }
+             if update.finishes_oauth {
+                 app.set_oauth_in_progress(false);
+                 app.set_oauth_authorization_url("".into());
+@@ -5427,6 +5472,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5530,6 +5576,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: true,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5573,6 +5620,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5615,6 +5663,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5657,6 +5706,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5701,6 +5751,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5740,6 +5791,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5779,6 +5831,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5822,6 +5875,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5862,6 +5916,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -5905,6 +5960,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -6867,47 +6923,239 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+             };
+             app.set_account_setup_in_progress(true);
+             let updates = ui_task_tx_for_account.clone();
+-            runtime_for_account.spawn(async move {
+-                let update = match core.add_password_account(args).await {
+-                    Ok(account) => {
+-                        // The account actor starts its first sync as soon as it
+-                        // is created. Waiting for that potentially enormous
+-                        // mailbox here would only hold the setup UI hostage.
+-                        let accounts = core.load_account_snapshot().await.ok();
+-                        UiTaskUpdate {
+-                            message: UiMessage::detail(
+-                                "Connected {}. Initial sync is running in the background.",
+-                                account.email,
+-                            ),
+-                            accounts,
+-                            calendar_connections: None,
+-                            carddav_connections: None,
+-                            calendar_error: None,
+-                            account_removal: None,
+-                            clear_account_form: true,
+-                            finishes_account_setup: true,
+-                            finishes_oauth: false,
+-                            close_to_tray: None,
++            let handle = runtime_for_account.clone();
++            std::thread::spawn(move || {
++                // Clone what we need for a possible retry after TOFU decision.
++                let core2 = core.clone();
++                let mut args2 = args.clone();
++                let updates2 = updates.clone();
++                let (decision_tx, decision_rx) = oneshot::channel();
++
++                // First attempt: add the account.
++                let update = handle.block_on(async {
++                    match core.add_password_account(args.clone()).await {
++                        Ok(account) => {
++                            let accounts = core.load_account_snapshot().await.ok();
++                            UiTaskUpdate {
++                                message: UiMessage::detail(
++                                    "Connected {}. Initial sync is running in the background.",
++                                    account.email,
++                                ),
++                                accounts,
++                                calendar_connections: None,
++                                carddav_connections: None,
++                                calendar_error: None,
++                                account_removal: None,
++                                clear_account_form: true,
++                                finishes_account_setup: true,
++                                finishes_oauth: false,
++                                close_to_tray: None,
++                                show_cert_dialog: None,
++                            }
++                        }
++                        Err(error) => {
++                            // Probe for an untrusted TLS certificate.
++                            let cert = core.capture_tls_certificate(args).await;
++                            if let Some(cert) = cert {
++                                let pending = PendingCertAccount {
++                                    core: core2,
++                                    args: args2.clone(),
++                                    cert: cert.clone(),
++                                    updates: updates2.clone(),
++                                    decision_tx,
++                                };
++                                *PENDING_CERT_ACCOUNT.lock().unwrap() = Some(pending);
++                                UiTaskUpdate {
++                                    message: UiMessage::detail(
++                                        "Account setup failed: {}",
++                                        error,
++                                    ),
++                                    accounts: None,
++                                    calendar_connections: None,
++                                    carddav_connections: None,
++                                    calendar_error: None,
++                                    account_removal: None,
++                                    clear_account_form: false,
++                                    finishes_account_setup: false,
++                                    finishes_oauth: false,
++                                    close_to_tray: None,
++                                    show_cert_dialog: Some(cert),
++                                }
++                            } else {
++                                UiTaskUpdate {
++                                    message: UiMessage::detail(
++                                        "Account setup failed: {}",
++                                        error,
++                                    ),
++                                    accounts: None,
++                                    calendar_connections: None,
++                                    carddav_connections: None,
++                                    calendar_error: None,
++                                    account_removal: None,
++                                    clear_account_form: false,
++                                    finishes_account_setup: true,
++                                    finishes_oauth: false,
++                                    close_to_tray: None,
++                                    show_cert_dialog: None,
++                                }
++                            }
+                         }
+                     }
+-                    Err(error) => UiTaskUpdate {
+-                        message: UiMessage::detail("Account setup failed: {}", error),
+-                        accounts: None,
+-                        calendar_connections: None,
+-                        carddav_connections: None,
+-                        calendar_error: None,
+-                        account_removal: None,
+-                        clear_account_form: false,
+-                        finishes_account_setup: true,
+-                        finishes_oauth: false,
+-                        close_to_tray: None,
+-                    },
+-                };
+-                let _ = updates.send(update).await;
++                });
++                let show_dialog = update.show_cert_dialog.is_some();
++                let _ = handle.block_on(async {
++                    updates.send(update).await.unwrap_or(())
++                });
++
++                // If we showed the cert dialog, wait for the user's decision
++                // and retry with the accepted certificate.
++                if show_dialog {
++                    let decision = decision_rx
++                        .blocking_recv()
++                        .unwrap_or(CertDecision::Reject);
++                    let pending = PENDING_CERT_ACCOUNT
++                        .lock()
++                        .unwrap()
++                        .take()
++                        .expect("PendingCertAccount disappeared");
++
++                    match decision {
++                        CertDecision::AcceptOnce | CertDecision::Pin => {
++                            // Trust the cert for this account by setting its PEM.
++                            args2.connection.trusted_certificate_pem =
++                                pending.cert.pem.clone();
++                        }
++                        CertDecision::AcceptAlways => {
++                            // Save to the global TOFU store.
++                            let host = pending.cert.host.clone();
++                            let pem = pending.cert.pem.clone();
++                            if let Ok(mut settings) = handle.block_on(async {
++                                pending.core.load_settings().await
++                            }) {
++                                settings.known_certificates.insert(host, pem);
++                                let _ = handle.block_on(async {
++                                    pending.core.save_settings(settings).await.ok()
++                                });
++                            }
++                        }
++                        CertDecision::Reject => {
++                            let done = UiTaskUpdate {
++                                message: UiMessage::plain("Account setup cancelled."),
++                                accounts: None,
++                                calendar_connections: None,
++                                carddav_connections: None,
++                                calendar_error: None,
++                                account_removal: None,
++                                clear_account_form: false,
++                                finishes_account_setup: true,
++                                finishes_oauth: false,
++                                close_to_tray: None,
++                                show_cert_dialog: None,
++                            };
++                            let _ = handle.block_on(async {
++                                updates2.send(done).await.unwrap_or(())
++                            });
++                            return;
++                        }
++                    }
++
++                    // Retry with the accepted certificate.
++                    let update = handle.block_on(async {
++                        match pending.core.add_password_account(args2).await {
++                            Ok(account) => {
++                                let accounts =
++                                    pending.core.load_account_snapshot().await.ok();
++                                UiTaskUpdate {
++                                    message: UiMessage::detail(
++                                        "Connected {}. Initial sync is running in the background.",
++                                        account.email,
++                                    ),
++                                    accounts,
++                                    calendar_connections: None,
++                                    carddav_connections: None,
++                                    calendar_error: None,
++                                    account_removal: None,
++                                    clear_account_form: true,
++                                    finishes_account_setup: true,
++                                    finishes_oauth: false,
++                                    close_to_tray: None,
++                                    show_cert_dialog: None,
++                                }
++                            }
++                            Err(error) => {
++                                UiTaskUpdate {
++                                    message: UiMessage::detail(
++                                        "Account setup failed: {}",
++                                        error,
++                                    ),
++                                    accounts: None,
++                                    calendar_connections: None,
++                                    carddav_connections: None,
++                                    calendar_error: None,
++                                    account_removal: None,
++                                    clear_account_form: false,
++                                    finishes_account_setup: true,
++                                    finishes_oauth: false,
++                                    close_to_tray: None,
++                                    show_cert_dialog: None,
++                                }
++                            }
++                        }
++                    });
++                    let _ = handle.block_on(async {
++                        updates2.send(update).await.unwrap_or(())
++                    });
++                }
+             });
+         },
+     );
+ 
++    // Certificate-verification dialog callbacks: send the user's decision
++    // back to the waiting probe task via the oneshot channel.
++    {
++        let cert_ui = app.global::<CertVerification>();
++        let app_weak = app.as_weak();
++        cert_ui.on_accept_once(move || {
++            let pending = PENDING_CERT_ACCOUNT.lock().unwrap().take();
++            if let Some(p) = pending {
++                let _ = p.decision_tx.send(CertDecision::AcceptOnce);
++                if let Some(app) = app_weak.upgrade() {
++                    app.global::<CertVerification>().set_visible(false);
++                }
++            }
++        });
++        let app_weak = app.as_weak();
++        cert_ui.on_accept_always(move || {
++            let pending = PENDING_CERT_ACCOUNT.lock().unwrap().take();
++            if let Some(p) = pending {
++                let _ = p.decision_tx.send(CertDecision::AcceptAlways);
++                if let Some(app) = app_weak.upgrade() {
++                    app.global::<CertVerification>().set_visible(false);
++                }
++            }
++        });
++        let app_weak = app.as_weak();
++        cert_ui.on_pin(move || {
++            let pending = PENDING_CERT_ACCOUNT.lock().unwrap().take();
++            if let Some(p) = pending {
++                let _ = p.decision_tx.send(CertDecision::Pin);
++                if let Some(app) = app_weak.upgrade() {
++                    app.global::<CertVerification>().set_visible(false);
++                }
++            }
++        });
++        let app_weak = app.as_weak();
++        cert_ui.on_reject(move || {
++            let pending = PENDING_CERT_ACCOUNT.lock().unwrap().take();
++            if let Some(p) = pending {
++                let _ = p.decision_tx.send(CertDecision::Reject);
++                if let Some(app) = app_weak.upgrade() {
++                    app.global::<CertVerification>().set_visible(false);
++                }
++            }
++        });
++    }
++
+     let app_weak = app.as_weak();
+     let state_for_oauth = Rc::clone(&state);
+     let runtime_for_oauth = runtime.clone();
+@@ -6979,6 +7227,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                         finishes_account_setup: false,
+                         finishes_oauth: true,
+                         close_to_tray: None,
++                        show_cert_dialog: None,
+                     }
+                 }
+                 Err(error) => UiTaskUpdate {
+@@ -6992,6 +7241,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: true,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 },
+             };
+             let _ = updates.send(update).await;
+@@ -7054,6 +7304,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                         finishes_account_setup: false,
+                         finishes_oauth: true,
+                         close_to_tray: None,
++                        show_cert_dialog: None,
+                     }
+                 }
+                 Err(error) => UiTaskUpdate {
+@@ -7067,6 +7318,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: true,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 },
+             };
+             let _ = updates.send(update).await;
+@@ -7153,6 +7405,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: true,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -7193,6 +7446,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -7227,6 +7481,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -7290,6 +7545,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -7348,6 +7604,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -7383,6 +7640,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+@@ -7414,6 +7672,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+                     finishes_account_setup: false,
+                     finishes_oauth: false,
+                     close_to_tray: None,
++                    show_cert_dialog: None,
+                 })
+                 .await;
+         });
+diff --git a/src/sync_controller.rs b/src/sync_controller.rs
+index 218457e..603882f 100644
+--- a/src/sync_controller.rs
++++ b/src/sync_controller.rs
+@@ -1183,6 +1183,7 @@ fn reload_accounts(
+                 finishes_account_setup: false,
+                 finishes_oauth: false,
+                 close_to_tray: None,
++                show_cert_dialog: None,
+             })
+             .await;
+     });
+diff --git a/src/window_controller.rs b/src/window_controller.rs
+index 30d1a19..4f5ffab 100644
+--- a/src/window_controller.rs
++++ b/src/window_controller.rs
+@@ -504,6 +504,7 @@ fn close_behavior_update(message: UiMessage, close_to_tray: Option<bool>) -> UiT
+         finishes_oauth: false,
+         finishes_account_setup: false,
+         close_to_tray,
++        show_cert_dialog: None,
+     }
+ }
+ 
+diff --git a/ui/app.slint b/ui/app.slint
+index e005952..f3e581d 100644
+--- a/ui/app.slint
++++ b/ui/app.slint
+@@ -23,6 +23,7 @@ export { Notice } from "notice.slint";
+ export { Unsubscribe } from "unsubscribe.slint";
+ export { AccountDiscovery, DavLookup } from "account-discovery.slint";
+ export { BlockSender } from "block-sender.slint";
++export { CertVerification } from "certificate-verification.slint";
+ export { ContactImport } from "contact-import.slint";
+ export { MailRules, RuleActionRow, RuleConditionRow, RuleRow } from "rules.slint";
+ import { MailRules } from "rules.slint";
+@@ -64,6 +65,8 @@ import { Notice } from "notice.slint";
+ import { UnsubscribeDialog } from "dialogs/unsubscribe-dialog.slint";
+ import { Unsubscribe } from "unsubscribe.slint";
+ import { BlockSenderDialog } from "dialogs/block-sender-dialog.slint";
++import { CertificateVerificationDialog } from "dialogs/certificate-verification-dialog.slint";
++import { CertVerification } from "certificate-verification.slint";
+ import { ContactImportDialog } from "dialogs/contact-import-dialog.slint";
+ import { ContactImport } from "contact-import.slint";
+ import { BlockSender } from "block-sender.slint";
+@@ -2808,6 +2811,14 @@ export component AppWindow inherits Window {
+         z: 16000;
+     }
+ 
++    if CertVerification.visible : CertificateVerificationDialog {
++        x: root.content-x;
++        y: root.content-y;
++        width: root.content-width;
++        height: root.content-height;
++        z: 16000;
++    }
++
+     if ContactImport.stage != "" : ContactImportDialog {
+         x: root.content-x;
+         y: root.content-y;
+diff --git a/ui/certificate-verification.slint b/ui/certificate-verification.slint
+new file mode 100644
+index 0000000..442af54
+--- /dev/null
++++ b/ui/certificate-verification.slint
+@@ -0,0 +1,24 @@
++// Certificate verification TOFU dialog state.  When a server presents an
++// untrusted or otherwise invalid TLS certificate during account setup, the
++// properties here carry its details and the callbacks report the user's
++// decision (src/mail_setup.rs).
++export global CertVerification {
++    // Whether the dialog is shown.
++    in-out property <bool> visible;
++    // The server hostname that presented the certificate.
++    in property <string> host;
++    // SHA-256 fingerprint of the DER certificate (hex).
++    in property <string> sha256_fingerprint;
++    // SHA-256 SPKI fingerprint for pinning (hex).
++    in property <string> spki_fingerprint;
++    // PEM-encoded end-entity certificate.
++    in property <string> pem;
++    // Human-readable summary of problems found with this certificate.
++    in property <string> problems;
++
++    // User decisions:
++    callback accept_once();    // Trust for this session only.
++    callback accept_always();  // Save to known certificates.
++    callback pin();            // Save and pin SPKI fingerprint.
++    callback reject();         // Do not connect.
++}
+diff --git a/ui/dialogs/certificate-verification-dialog.slint b/ui/dialogs/certificate-verification-dialog.slint
+new file mode 100644
+index 0000000..0a3b0fc
+--- /dev/null
++++ b/ui/dialogs/certificate-verification-dialog.slint
+@@ -0,0 +1,193 @@
++import { VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
++import { AppTheme } from "../design-system.slint";
++import { Button } from "../components/button.slint";
++import { TypeScale } from "../typography.slint";
++import { CertVerification } from "../certificate-verification.slint";
++
++// Presented during account setup when the server's TLS certificate cannot
++// be verified.  Shows certificate details and lets the user decide whether
++// to trust it, pin it, or cancel the connection.
++export component CertificateVerificationDialog inherits Rectangle {
++    private property <bool> narrow: panel.width < 380px;
++
++    visible: CertVerification.visible;
++    background: #00000088;
++    z: 60000;
++    accessible-role: groupbox;
++    accessible-label: @tr("Certificate verification");
++
++    changed visible => {
++        if self.visible {
++            dialog-focus.focus();
++        }
++    }
++
++    // Consume pointer input over the scrim.
++    TouchArea { }
++
++    panel := Rectangle {
++        x: (parent.width - self.width) / 2;
++        y: (parent.height - self.height) / 2;
++        width: min(480px, parent.width - 32px);
++        height: min(560px, parent.height - 32px);
++        border-radius: 14px;
++        border-width: 1px;
++        border-color: AppTheme.control-border;
++        background: AppTheme.surface;
++        clip: true;
++
++        dialog-focus := FocusScope {
++            capture-key-pressed(event) => {
++                if event.text == Key.Escape {
++                    CertVerification.visible = false;
++                    CertVerification.reject();
++                    return accept;
++                }
++                reject
++            }
++
++            VerticalBox {
++                padding: 24px;
++                spacing: 12px;
++
++                Text {
++                    text: @tr("Certificate verification required");
++                    color: AppTheme.heading;
++                    font-size: TypeScale.title-large;
++                    font-weight: 600;
++                }
++                Text {
++                    text: @tr("The server's TLS certificate could not be verified.");
++                    color: AppTheme.secondary;
++                    font-size: TypeScale.body;
++                    wrap: word-wrap;
++                }
++
++                // Problems summary
++                if CertVerification.problems != "" : Rectangle {
++                    border-radius: 8px;
++                    background: AppTheme.destructive.transparentize(0.88);
++                    border-width: 1px;
++                    border-color: AppTheme.destructive.transparentize(0.4);
++                    VerticalBox {
++                        x: 12px;
++                        y: 12px;
++                        width: parent.width - 24px;
++                        height: parent.height - 24px;
++                        Text {
++                            text: CertVerification.problems;
++                            color: AppTheme.destructive;
++                            font-size: TypeScale.caption;
++                            wrap: word-wrap;
++                        }
++                    }
++                }
++
++                // Certificate details
++                ScrollView {
++                    vertical-stretch: 1;
++                    VerticalBox {
++                        padding: 0px;
++                        padding-right: 12px;
++                        spacing: 8px;
++
++                        Text {
++                            text: @tr("Server: {}",
++                                CertVerification.host != "" ? CertVerification.host : @tr("(unknown)"));
++                            color: AppTheme.heading;
++                            font-size: TypeScale.body;
++                            font-weight: 600;
++                            wrap: word-wrap;
++                        }
++
++                        HorizontalBox {
++                            spacing: 4px;
++                            Text {
++                                text: @tr("SHA-256 fingerprint:");
++                                color: AppTheme.secondary;
++                                font-size: TypeScale.secondary;
++                            }
++                            Text {
++                                text: CertVerification.sha256_fingerprint;
++                                color: AppTheme.body;
++                                font-size: TypeScale.caption;
++                                font-family: "monospace";
++                                wrap: word-wrap;
++                            }
++                        }
++
++                        HorizontalBox {
++                            spacing: 4px;
++                            Text {
++                                text: @tr("SPKI fingerprint:");
++                                color: AppTheme.secondary;
++                                font-size: TypeScale.secondary;
++                            }
++                            Text {
++                                text: CertVerification.spki_fingerprint;
++                                color: AppTheme.body;
++                                font-size: TypeScale.caption;
++                                font-family: "monospace";
++                                wrap: word-wrap;
++                            }
++                        }
++
++                        Text {
++                            text: @tr("Verify the fingerprints above with your server administrator before trusting this certificate.");
++                            color: AppTheme.muted;
++                            font-size: TypeScale.caption;
++                            wrap: word-wrap;
++                        }
++
++                        Text {
++                            text: @tr("What would you like to do with this certificate?");
++                            color: AppTheme.heading;
++                            font-size: TypeScale.body;
++                            font-weight: 600;
++                            wrap: word-wrap;
++                        }
++                    }
++                }
++
++                // Buttons
++                VerticalBox {
++                    spacing: 8px;
++
++                    Button {
++                        height: 40px;
++                        text: @tr("Accept once (this session only)");
++                        clicked => {
++                            CertVerification.visible = false;
++                            CertVerification.accept_once();
++                        }
++                    }
++                    Button {
++                        height: 40px;
++                        text: @tr("Accept always (save to trusted certificates)");
++                        primary: true;
++                        clicked => {
++                            CertVerification.visible = false;
++                            CertVerification.accept_always();
++                        }
++                    }
++                    Button {
++                        height: 40px;
++                        text: @tr("Pin certificate (verify exact certificate)");
++                        clicked => {
++                            CertVerification.visible = false;
++                            CertVerification.pin();
++                        }
++                    }
++                    Button {
++                        height: 40px;
++                        text: @tr("Reject");
++                        clicked => {
++                            CertVerification.visible = false;
++                            CertVerification.reject();
++                        }
++                    }
++                }
++            }
++        }
++    }
++}

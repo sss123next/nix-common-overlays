@@ -27,6 +27,7 @@ self: super: {
         ./patches/flectar-mail/0001-add-caching-credential-store.patch
         ./patches/flectar-mail/0002-disable-flectar-services.patch
         ./patches/flectar-mail/0003-add-tls-cert-policy.patch
+        ./patches/flectar-mail/0004-add-tofu-cert-policy-integration.patch
       ];
 
       nativeBuildInputs = [
