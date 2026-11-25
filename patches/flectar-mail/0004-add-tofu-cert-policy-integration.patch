@@ -46,7 +46,7 @@ index d2f8c39..c3124ac 100644
          "imaps"
      } else {
 diff --git a/crates/flectar-mail-core/src/lib.rs b/crates/flectar-mail-core/src/lib.rs
-index 8955939..60c66c9 100644
+index 8955939..91f73b3 100644
 --- a/crates/flectar-mail-core/src/lib.rs
 +++ b/crates/flectar-mail-core/src/lib.rs
 @@ -447,7 +447,7 @@ fn password_account_config(args: &AddPasswordAccountArgs, id: i64) -> AccountCon
@@ -111,7 +111,39 @@ index 8955939..60c66c9 100644
  fn explain_imap_sign_in(args: &AddPasswordAccountArgs, error: CoreError) -> CoreError {
      match error {
          CoreError::Auth(detail) if is_apple_mailbox(&args.email, &args.incoming_host) => {
-@@ -2327,43 +2364,28 @@ impl Core {
+@@ -2063,6 +2100,31 @@ impl Core {
+         Ok(())
+     }
+ 
++    /// Update the SPKI fingerprints pinned for an IMAP/POP3/JMAP account.
++    pub async fn set_account_pinned_certificates(
++        &self,
++        account_id: i64,
++        pinned: Vec<String>,
++    ) -> Result<()> {
++        let changed = self
++            .db
++            .write(move |conn| {
++                let tx = conn.transaction()?;
++                let mut config = repo::accounts::get_config(&tx, account_id)?
++                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
++                config.settings.connection.pinned_certificates = pinned;
++                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
++                tx.commit()?;
++                Ok(config)
++            })
++            .await?;
++        if let Some(handle) = self.handles.write().await.remove(&account_id) {
++            handle.abort();
++        }
++        self.spawn_actor(changed).await;
++        Ok(())
++    }
++
+     /// The folders an IMAP account's roles such as Sent go to, with the one
+     /// each goes to unless one is chosen, the one chosen by hand, and the
+     /// folders a role can go to (#252).
+@@ -2327,43 +2389,28 @@ impl Core {
  
      /// Try to capture the server's untrusted certificate for a TOFU dialog,
      /// after the real connection already failed.
@@ -170,7 +202,7 @@ index 8955939..60c66c9 100644
          let result = match args.mail_protocol {
              MailProtocol::Jmap => crate::jmap::client::connect_with(
                  &args.email,
-@@ -2376,11 +2398,11 @@ impl Core {
+@@ -2376,11 +2423,11 @@ impl Core {
              .map(|_| ())
              .map_err(|error| error.to_client_json()),
              MailProtocol::Imap => self
@@ -184,7 +216,7 @@ index 8955939..60c66c9 100644
                  .await
                  .map(drop)
                  .map_err(|error| error.to_string()),
-@@ -2398,7 +2420,7 @@ impl Core {
+@@ -2398,7 +2445,7 @@ impl Core {
                  // TOFU dialog.  This connects a second time with a capturing
                  // verifier; it is best-effort and may also fail (the port
                  // could be wrong, the server may have timed out, etc.).
@@ -193,7 +225,7 @@ index 8955939..60c66c9 100644
                  ConnectionTestResult {
                      ok: false,
                      error: Some(error),
-@@ -2409,8 +2431,14 @@ impl Core {
+@@ -2409,8 +2456,14 @@ impl Core {
      }
  
      /// Checks the servers of a new account, or of account `id` being edited.
@@ -209,7 +241,7 @@ index 8955939..60c66c9 100644
          let mut session = with_username_fallback(
              args,
              owner,
-@@ -2425,6 +2453,7 @@ impl Core {
+@@ -2425,6 +2478,7 @@ impl Core {
                      args.incoming_port,
                      creds,
                      &args.connection,
@@ -217,7 +249,7 @@ index 8955939..60c66c9 100644
                  )
                  .await
              },
-@@ -2434,7 +2463,7 @@ impl Core {
+@@ -2434,7 +2488,7 @@ impl Core {
          let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
          imap::logout(session).await;
          mailbox_result?;
@@ -226,7 +258,7 @@ index 8955939..60c66c9 100644
      }
  
      /// Returns what the POP3 server announced, which the first sync has to
-@@ -2443,13 +2472,15 @@ impl Core {
+@@ -2443,13 +2497,15 @@ impl Core {
          &self,
          args: &mut AddPasswordAccountArgs,
          id: i64,
@@ -244,7 +276,7 @@ index 8955939..60c66c9 100644
          Ok(probe)
      }
  
-@@ -2614,6 +2645,15 @@ impl Core {
+@@ -2614,6 +2670,15 @@ impl Core {
          let mut pop3_probe = None;
          // The checks wait as long as the account's server timeout says (#252).
          let server_timeout = args.connection.server_timeout();
@@ -260,7 +292,7 @@ index 8955939..60c66c9 100644
          let jmap_account_id = match args.mail_protocol {
              MailProtocol::Jmap => Some(
                  net::timeouts::scope(
-@@ -2631,18 +2671,20 @@ impl Core {
+@@ -2631,18 +2696,20 @@ impl Core {
                  .account_id,
              ),
              MailProtocol::Imap => {
@@ -290,7 +322,19 @@ index 8955939..60c66c9 100644
                  None
              }
              MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
-@@ -5835,12 +5877,14 @@ impl Core {
+@@ -5796,6 +5863,11 @@ impl Core {
+             .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))
+     }
+ 
++    /// Load one account's full config.
++    pub async fn load_account_config(&self, account_id: i64) -> Result<AccountConfig> {
++        self.folder_account_config(account_id).await
++    }
++
+     async fn folder_for_child(
+         &self,
+         account_id: i64,
+@@ -5835,12 +5907,14 @@ impl Core {
                  access_token: self.tokens.access_token(config.id, config.provider).await?,
              },
          };
@@ -331,7 +375,7 @@ index 780f243..58e7d03 100644
  }
  
 diff --git a/crates/flectar-mail-core/src/net/tls.rs b/crates/flectar-mail-core/src/net/tls.rs
-index 05eae2d..b3bcc80 100644
+index 05eae2d..2be36d7 100644
 --- a/crates/flectar-mail-core/src/net/tls.rs
 +++ b/crates/flectar-mail-core/src/net/tls.rs
 @@ -7,6 +7,7 @@ pub mod cert_policy;
@@ -494,6 +538,18 @@ index 05eae2d..b3bcc80 100644
          })
      };
  
+@@ -395,6 +430,11 @@ pub fn handshake_advice(error: &std::io::Error) -> &'static str {
+         .get_ref()
+         .and_then(|inner| inner.downcast_ref::<rustls::Error>());
+     match tls {
++        Some(rustls::Error::InvalidCertificate(
++            CertificateError::Other(other),
++        )) if other.0.downcast_ref::<cert_policy::PinningError>().is_some() => {
++            cert_policy::pinning_advice()
++        }
+         Some(rustls::Error::InvalidCertificate(
+             CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. },
+         )) => "Use the server name shown on its certificate.",
 diff --git a/crates/flectar-mail-core/src/pop3/mod.rs b/crates/flectar-mail-core/src/pop3/mod.rs
 index 3428a49..e46f314 100644
 --- a/crates/flectar-mail-core/src/pop3/mod.rs
@@ -714,6 +770,23 @@ index b7bc365..a6ec0d7 100644
          .await
          .map_err(Failure::into_error)?;
      let signed_in_at = now_ms();
+diff --git a/src/account_controller.rs b/src/account_controller.rs
+index 2403702..1df1edd 100644
+--- a/src/account_controller.rs
++++ b/src/account_controller.rs
+@@ -455,6 +455,12 @@ pub(super) fn apply_connected_accounts(
+                     .server_keeps_mail_days
+                     .and_then(|days| i32::try_from(days).ok())
+                     .unwrap_or(-1),
++                pinned_certificates: config
++                    .settings
++                    .connection
++                    .pinned_certificates
++                    .clone()
++                    .into(),
+                 calendar_connections: calendar_connection_rows(calendars),
+                 provider_calendar_connected: calendars.iter().any(|connection| {
+                     connection.kind != flectar_mail_core::models::CalendarConnectionKind::Generic
 diff --git a/src/data_controller.rs b/src/data_controller.rs
 index 991eb4d..61e4e19 100644
 --- a/src/data_controller.rs
@@ -727,7 +800,7 @@ index 991eb4d..61e4e19 100644
                          .await;
                  });
 diff --git a/src/mail.rs b/src/mail.rs
-index c5174e8..8063c30 100644
+index c5174e8..f26d285 100644
 --- a/src/mail.rs
 +++ b/src/mail.rs
 @@ -15,7 +15,7 @@ use flectar_mail_core::{
@@ -739,7 +812,73 @@ index c5174e8..8063c30 100644
      },
  };
  #[cfg(test)]
-@@ -3118,6 +3118,15 @@ impl CoreMailSource {
+@@ -2414,6 +2414,65 @@ impl CoreMailSource {
+             .map_err(|error| error.to_string())
+     }
+ 
++    pub async fn set_account_pinned_certificates(
++        &self,
++        account_id: i64,
++        pinned: Vec<String>,
++    ) -> Result<(), String> {
++        self.core
++            .set_account_pinned_certificates(account_id, pinned)
++            .await
++            .map_err(|error| error.to_string())
++    }
++
++    /// Capture the server's TLS certificate and pin its SPKI fingerprint
++    /// for an already-configured account.
++    pub async fn pin_account_certificate(&self, account_id: i64) -> Result<(), String> {
++        use flectar_mail_core::models::{MailProtocol, AuthKind};
++        // Load the account config.
++        let config = self
++            .core
++            .load_account_config(account_id)
++            .await
++            .map_err(|e| e.to_string())?;
++        if config.mail_protocol != MailProtocol::Imap
++            && config.mail_protocol != MailProtocol::Pop3
++        {
++            return Err("Only IMAP and POP3 accounts support certificate pinning.".into());
++        }
++
++        // Build minimal args for capture (no password needed — capture only
++        // connects and performs the TLS handshake without authenticating).
++        let args = flectar_mail_core::models::AddPasswordAccountArgs {
++            email: config.email.clone(),
++            display_name: None,
++            username: String::new(),
++            password: String::new(),
++            mail_protocol: config.mail_protocol,
++            jmap_url: config.jmap_url.clone(),
++            incoming_host: config.incoming_host.clone(),
++            incoming_port: config.incoming_port,
++            smtp_host: config.smtp_host.clone(),
++            smtp_port: config.smtp_port,
++            smtp_password: None,
++            connection: config.settings.connection.clone(),
++        };
++
++        // Capture the certificate from the server (no authentication needed).
++        let cert = self
++            .core
++            .capture_tls_certificate(args)
++            .await
++            .ok_or_else(|| "Could not capture the server's certificate. The server may be unreachable or the connection failed differently.".to_string())?;
++
++        // Store the SPKI fingerprint.
++        let fingerprint = cert.spki_sha256_fingerprint;
++        self.core
++            .set_account_pinned_certificates(account_id, vec![fingerprint])
++            .await
++            .map_err(|e| e.to_string())
++    }
++
+     pub async fn set_account_color(
+         &self,
+         account_id: i64,
+@@ -3118,6 +3177,15 @@ impl CoreMailSource {
              .map_err(|error| error.to_string())
      }
  
@@ -756,7 +895,7 @@ index c5174e8..8063c30 100644
          &self,
          provider: Provider,
 diff --git a/src/main.rs b/src/main.rs
-index 1adee47..67518ba 100644
+index 1adee47..72da2d9 100644
 --- a/src/main.rs
 +++ b/src/main.rs
 @@ -173,7 +173,8 @@ use flectar_mail_core::models::{
@@ -916,7 +1055,7 @@ index 1adee47..67518ba 100644
                  })
                  .await;
          });
-@@ -5905,6 +5962,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5905,11 +5962,107 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -924,7 +1063,107 @@ index 1adee47..67518ba 100644
                  })
                  .await;
          });
-@@ -6867,47 +6925,271 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+     });
+ 
++    // --- Certificate pin / unpin callbacks ---
++    let app_weak = app.as_weak();
++    let state_for_pin = Rc::clone(&state);
++    let runtime_for_pin = runtime.clone();
++    let ui_task_tx_for_pin = ui_task_tx.clone();
++    app.on_remove_pin(move |account_id| {
++        let Some(app) = app_weak.upgrade() else { return };
++        let Some(core) = state_for_pin.borrow().core.clone() else {
++            app.set_sync_status(UiMessage::plain("Pin settings require local mail data."));
++            return;
++        };
++        let account_id = i64::from(account_id);
++        app.set_sync_status(UiMessage::plain("Removing certificate pin…"));
++        let updates = ui_task_tx_for_pin.clone();
++        let handle = runtime_for_pin.clone();
++        std::thread::spawn(move || {
++            let result = handle.block_on(
++                core.set_account_pinned_certificates(account_id, Vec::new()),
++            );
++            let (message, accounts) = handle.block_on(async {
++                let accounts = core.load_account_snapshot().await.ok();
++                match result {
++                    Ok(()) => (UiMessage::plain("Certificate pin removed."), accounts),
++                    Err(e) => (
++                        UiMessage::detail("Could not remove certificate pin: {}", e),
++                        accounts,
++                    ),
++                }
++            });
++            let _ = handle.block_on(async {
++                updates
++                    .send(UiTaskUpdate {
++                        message,
++                        accounts,
++                        calendar_connections: None,
++                        carddav_connections: None,
++                        calendar_error: None,
++                        account_removal: None,
++                        clear_account_form: false,
++                        finishes_account_setup: false,
++                        finishes_oauth: false,
++                        close_to_tray: None,
++                        show_cert_dialog: None,
++                    })
++                    .await
++            });
++        });
++    });
++
++    let app_weak = app.as_weak();
++    let state_for_pin_capture = Rc::clone(&state);
++    let runtime_for_pin_capture = runtime.clone();
++    let ui_task_tx_for_pin_capture = ui_task_tx.clone();
++    app.on_pin_certificate(move |account_id| {
++        let Some(app) = app_weak.upgrade() else { return };
++        let Some(core) = state_for_pin_capture.borrow().core.clone() else {
++            app.set_sync_status(UiMessage::plain("Pin capture requires local mail data."));
++            return;
++        };
++        let account_id = i64::from(account_id);
++        app.set_sync_status(UiMessage::plain("Capturing server certificate for pinning…"));
++        let updates = ui_task_tx_for_pin_capture.clone();
++        let handle = runtime_for_pin_capture.clone();
++        std::thread::spawn(move || {
++            let result = handle.block_on(core.pin_account_certificate(account_id));
++            let (message, accounts) = handle.block_on(async {
++                let accounts = core.load_account_snapshot().await.ok();
++                match result {
++                    Ok(()) => (UiMessage::plain("Certificate pinned."), accounts),
++                    Err(e) => (
++                        UiMessage::detail("Could not pin certificate: {}", e),
++                        accounts,
++                    ),
++                }
++            });
++            let _ = handle.block_on(async {
++                updates
++                    .send(UiTaskUpdate {
++                        message,
++                        accounts,
++                        calendar_connections: None,
++                        carddav_connections: None,
++                        calendar_error: None,
++                        account_removal: None,
++                        clear_account_form: false,
++                        finishes_account_setup: false,
++                        finishes_oauth: false,
++                        close_to_tray: None,
++                        show_cert_dialog: None,
++                    })
++                    .await
++            });
++        });
++    });
++
+     let app_weak = app.as_weak();
+     let state_for_remote_images = Rc::clone(&state);
+     let runtime_for_remote_images = runtime.clone();
+@@ -6867,47 +7020,271 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
              };
              app.set_account_setup_in_progress(true);
              let updates = ui_task_tx_for_account.clone();
@@ -1231,7 +1470,7 @@ index 1adee47..67518ba 100644
      let app_weak = app.as_weak();
      let state_for_oauth = Rc::clone(&state);
      let runtime_for_oauth = runtime.clone();
-@@ -6979,6 +7261,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -6979,6 +7356,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                          finishes_account_setup: false,
                          finishes_oauth: true,
                          close_to_tray: None,
@@ -1239,7 +1478,7 @@ index 1adee47..67518ba 100644
                      }
                  }
                  Err(error) => UiTaskUpdate {
-@@ -6992,6 +7275,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -6992,6 +7370,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: true,
                      close_to_tray: None,
@@ -1247,7 +1486,7 @@ index 1adee47..67518ba 100644
                  },
              };
              let _ = updates.send(update).await;
-@@ -7054,6 +7338,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7054,6 +7433,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                          finishes_account_setup: false,
                          finishes_oauth: true,
                          close_to_tray: None,
@@ -1255,7 +1494,7 @@ index 1adee47..67518ba 100644
                      }
                  }
                  Err(error) => UiTaskUpdate {
-@@ -7067,6 +7352,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7067,6 +7447,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: true,
                      close_to_tray: None,
@@ -1263,7 +1502,7 @@ index 1adee47..67518ba 100644
                  },
              };
              let _ = updates.send(update).await;
-@@ -7153,6 +7439,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7153,6 +7534,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: true,
                      close_to_tray: None,
@@ -1271,7 +1510,7 @@ index 1adee47..67518ba 100644
                  })
                  .await;
          });
-@@ -7193,6 +7480,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7193,6 +7575,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1279,7 +1518,7 @@ index 1adee47..67518ba 100644
                  })
                  .await;
          });
-@@ -7227,6 +7515,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7227,6 +7610,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1287,7 +1526,7 @@ index 1adee47..67518ba 100644
                  })
                  .await;
          });
-@@ -7290,6 +7579,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7290,6 +7674,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1295,7 +1534,7 @@ index 1adee47..67518ba 100644
                  })
                  .await;
          });
-@@ -7348,6 +7638,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7348,6 +7733,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1303,7 +1542,7 @@ index 1adee47..67518ba 100644
                  })
                  .await;
          });
-@@ -7383,6 +7674,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7383,6 +7769,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1311,7 +1550,7 @@ index 1adee47..67518ba 100644
                  })
                  .await;
          });
-@@ -7414,6 +7706,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7414,6 +7801,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1344,7 +1583,7 @@ index 30d1a19..4f5ffab 100644
  }
  
 diff --git a/ui/app.slint b/ui/app.slint
-index e005952..f3e581d 100644
+index e005952..4a8f3eb 100644
 --- a/ui/app.slint
 +++ b/ui/app.slint
 @@ -23,6 +23,7 @@ export { Notice } from "notice.slint";
@@ -1364,7 +1603,27 @@ index e005952..f3e581d 100644
  import { ContactImportDialog } from "dialogs/contact-import-dialog.slint";
  import { ContactImport } from "contact-import.slint";
  import { BlockSender } from "block-sender.slint";
-@@ -2808,6 +2811,14 @@ export component AppWindow inherits Window {
+@@ -1601,6 +1604,9 @@ export component AppWindow inherits Window {
+     in-out property <string> incoming_security: "tls";
+     in-out property <string> smtp_security: "tls";
+     in-out property <string> trusted_certificate_pem;
++    in-out property <[string]> pinned_certificates;
++    callback remove_pin(int);
++    callback pin_certificate(int);
+     // The account form's advanced settings (#252).
+     in-out property <bool> account_sends_mail: true;
+     in-out property <string> incoming_login: "automatic";
+@@ -2504,6 +2510,9 @@ export component AppWindow inherits Window {
+             incoming_security <=> root.incoming_security;
+             smtp_security <=> root.smtp_security;
+             trusted_certificate_pem <=> root.trusted_certificate_pem;
++            pinned_certificates <=> root.pinned_certificates;
++            remove_pin(account_id) => { root.remove_pin(account_id); }
++            pin_certificate(account_id) => { root.pin_certificate(account_id); }
+             account_sends_mail <=> root.account_sends_mail;
+             incoming_login <=> root.incoming_login;
+             smtp_login <=> root.smtp_login;
+@@ -2808,6 +2817,14 @@ export component AppWindow inherits Window {
          z: 16000;
      }
  
@@ -1409,6 +1668,79 @@ index 0000000..442af54
 +    callback pin();            // Save and pin SPKI fingerprint.
 +    callback reject();         // Do not connect.
 +}
+diff --git a/ui/components/mail-security-fields.slint b/ui/components/mail-security-fields.slint
+index 4b17bb3..31b4c31 100644
+--- a/ui/components/mail-security-fields.slint
++++ b/ui/components/mail-security-fields.slint
+@@ -40,6 +40,13 @@ export component MailSecurityFields inherits VerticalBox {
+     callback import-certificate();
+     private property <bool> certificate-expanded: false;
+     private property <bool> uses-tls: root.incoming-security != "none" || (root.sends-mail && root.smtp-security != "none");
++    // Certificate pinning (SPKI fingerprint).
++    in property <[string]> pinned-certificates: [];
++    in-out property <string> pin-text: root.pinned-certificates.length > 0
++        ? @tr("Certificate pinned (SPKI): {} fingerprints") % root.pinned-certificates.length
++        : "";
++    callback remove-pin();
++    callback pin-certificate();
+     spacing: 8px;
+     padding: 0px;
+     vertical-stretch: 0;
+@@ -143,6 +150,54 @@ export component MailSecurityFields inherits VerticalBox {
+     if root.uses-tls && root.certificate-pem != "" && !root.certificate-expanded : Text {
+         text: @tr("Custom certificate added for this account."); color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+     }
++
++    // --- Certificate pinning ---
++    if root.uses-tls : HorizontalBox {
++        padding: 0px; spacing: 8px;
++        Button {
++            height: 36px;
++            text: root.pinned-certificates.length > 0
++                ? @tr("Manage pinned certificate ({} SPKI fingerprints)") % root.pinned-certificates.length
++                : @tr("Pin server certificate…");
++            label-overflow: elide;
++            enabled: root.enabled;
++            clicked => { root.certificate-pinned-expanded = !root.certificate-pinned-expanded; }
++        }
++    }
++    if root.uses-tls && root.certificate-pinned-expanded : VerticalBox {
++        padding: 0px; spacing: 8px;
++        Text {
++            text: @tr("Pinning stores the server's SPKI SHA-256 fingerprint. On every connection the server's certificate must match a pinned fingerprint. This protects against certificate authority compromises.");
++            color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
++        }
++        if root.pinned-certificates.length > 0 : VerticalBox {
++            padding: 0px; spacing: 4px;
++            Text { text: @tr("Pinned fingerprints:"); color: AppTheme.heading; font-size: TypeScale.caption; }
++            for fp in root.pinned-certificates : Text {
++                text: fp;
++                color: AppTheme.secondary; font-size: TypeScale.caption; font-family: monospace;
++                wrap: word-wrap; height: self.preferred-height;
++            }
++        }
++        HorizontalBox {
++            padding: 0px; spacing: 8px;
++            Button {
++                height: 36px;
++                text: @tr("Pin current server certificate");
++                label-overflow: elide;
++                enabled: root.enabled;
++                clicked => { root.pin-certificate(); }
++            }
++            if root.pinned-certificates.length > 0 : Button {
++                height: 36px;
++                text: @tr("Remove pin");
++                label-overflow: elide;
++                enabled: root.enabled;
++                clicked => { root.remove-pin(); }
++            }
++        }
++    }
++    private property <bool> certificate-pinned-expanded: false;
+ }
+ 
+ // The account form's advanced settings (#252), during setup and edits. They
 diff --git a/ui/dialogs/certificate-verification-dialog.slint b/ui/dialogs/certificate-verification-dialog.slint
 new file mode 100644
 index 0000000..0a3b0fc
@@ -1608,3 +1940,49 @@ index 0000000..0a3b0fc
 +        }
 +    }
 +}
+diff --git a/ui/dialogs/settings-dialog.slint b/ui/dialogs/settings-dialog.slint
+index 3664f6b..c112945 100644
+--- a/ui/dialogs/settings-dialog.slint
++++ b/ui/dialogs/settings-dialog.slint
+@@ -577,6 +577,9 @@ export component SettingsDialog inherits Rectangle {
+     in-out property <string> incoming_security: "tls";
+     in-out property <string> smtp_security: "tls";
+     in-out property <string> trusted_certificate_pem;
++    in-out property <[string]> pinned_certificates;
++    callback remove_pin(int);
++    callback pin_certificate(int);
+     // The account form's advanced settings (#252).
+     in-out property <bool> account_sends_mail: true;
+     in-out property <string> incoming_login: "automatic";
+@@ -1178,6 +1181,7 @@ export component SettingsDialog inherits Rectangle {
+             root.incoming_security = account.incoming_security;
+             root.smtp_security = account.smtp_security;
+             root.trusted_certificate_pem = account.trusted_certificate_pem;
++            root.pinned_certificates = account.pinned_certificates;
+             root.incoming_host = account.incoming_host;
+             root.incoming_port = account.incoming_port;
+             root.smtp_host = account.smtp_host;
+@@ -4769,6 +4773,9 @@ export component SettingsDialog inherits Rectangle {
+                                     sends-mail: root.account_sends_mail;
+                                     certificate-pem <=> root.trusted_certificate_pem;
+                                     import-certificate => { root.import_mail_certificate(); }
++                                    pinned-certificates <=> root.pinned_certificates;
++                                    remove-pin => { root.remove_pin(root.open-account); }
++                                    pin-certificate => { root.pin_certificate(root.open-account); }
+                                 }
+                                 if root.account_protocol != "jmap" : MailAdvancedFields {
+                                     incoming-protocol: root.account_protocol;
+diff --git a/ui/models.slint b/ui/models.slint
+index cf451f3..088ddae 100644
+--- a/ui/models.slint
++++ b/ui/models.slint
+@@ -368,6 +368,9 @@ export struct AccountRow {
+     // IMAP: what downloads ahead of time, "headers", "messages" or
+     // "everything" (#253).
+     download: string,
++    // SPKI SHA-256 fingerprints pinned for this account, hex-encoded.
++    // Non-empty means the server's end-entity must match one of them.
++    pinned_certificates: [string],
+     // Days a POP3 server keeps downloaded mail on its own; -1 when it
+     // keeps it or hasn't said.
+     server_keeps_mail_days: int,
