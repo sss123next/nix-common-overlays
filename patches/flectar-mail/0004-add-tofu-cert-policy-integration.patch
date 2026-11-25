@@ -756,7 +756,7 @@ index c5174e8..8063c30 100644
          &self,
          provider: Provider,
 diff --git a/src/main.rs b/src/main.rs
-index 1adee47..5d7b3fe 100644
+index 1adee47..67518ba 100644
 --- a/src/main.rs
 +++ b/src/main.rs
 @@ -173,7 +173,8 @@ use flectar_mail_core::models::{
@@ -924,7 +924,7 @@ index 1adee47..5d7b3fe 100644
                  })
                  .await;
          });
-@@ -6867,47 +6925,261 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -6867,47 +6925,271 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
              };
              app.set_account_setup_in_progress(true);
              let updates = ui_task_tx_for_account.clone();
@@ -1060,10 +1060,20 @@ index 1adee47..5d7b3fe 100644
 +                        .expect("PendingCertAccount disappeared");
 +
 +                    match decision {
-+                        CertDecision::AcceptOnce | CertDecision::Pin => {
++                        CertDecision::AcceptOnce => {
 +                            // Trust the cert for this account by setting its PEM.
 +                            args2.connection.trusted_certificate_pem =
 +                                pending.cert.pem.clone();
++                        }
++                        CertDecision::Pin => {
++                            // Trust the cert for this account AND pin its SPKI
++                            // fingerprint so every subsequent connection is
++                            // verified against the pinned identity.
++                            args2.connection.trusted_certificate_pem =
++                                pending.cert.pem.clone();
++                            args2.connection.pinned_certificates = vec![
++                                pending.cert.spki_sha256_fingerprint.clone(),
++                            ];
 +                        }
 +                        CertDecision::AcceptAlways => {
 +                            // Save to the global TOFU store so future new
@@ -1221,7 +1231,7 @@ index 1adee47..5d7b3fe 100644
      let app_weak = app.as_weak();
      let state_for_oauth = Rc::clone(&state);
      let runtime_for_oauth = runtime.clone();
-@@ -6979,6 +7251,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -6979,6 +7261,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                          finishes_account_setup: false,
                          finishes_oauth: true,
                          close_to_tray: None,
@@ -1229,7 +1239,7 @@ index 1adee47..5d7b3fe 100644
                      }
                  }
                  Err(error) => UiTaskUpdate {
-@@ -6992,6 +7265,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -6992,6 +7275,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: true,
                      close_to_tray: None,
@@ -1237,7 +1247,7 @@ index 1adee47..5d7b3fe 100644
                  },
              };
              let _ = updates.send(update).await;
-@@ -7054,6 +7328,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7054,6 +7338,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                          finishes_account_setup: false,
                          finishes_oauth: true,
                          close_to_tray: None,
@@ -1245,7 +1255,7 @@ index 1adee47..5d7b3fe 100644
                      }
                  }
                  Err(error) => UiTaskUpdate {
-@@ -7067,6 +7342,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7067,6 +7352,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: true,
                      close_to_tray: None,
@@ -1253,7 +1263,7 @@ index 1adee47..5d7b3fe 100644
                  },
              };
              let _ = updates.send(update).await;
-@@ -7153,6 +7429,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7153,6 +7439,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: true,
                      close_to_tray: None,
@@ -1261,7 +1271,7 @@ index 1adee47..5d7b3fe 100644
                  })
                  .await;
          });
-@@ -7193,6 +7470,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7193,6 +7480,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1269,7 +1279,7 @@ index 1adee47..5d7b3fe 100644
                  })
                  .await;
          });
-@@ -7227,6 +7505,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7227,6 +7515,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1277,7 +1287,7 @@ index 1adee47..5d7b3fe 100644
                  })
                  .await;
          });
-@@ -7290,6 +7569,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7290,6 +7579,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1285,7 +1295,7 @@ index 1adee47..5d7b3fe 100644
                  })
                  .await;
          });
-@@ -7348,6 +7628,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7348,6 +7638,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1293,7 +1303,7 @@ index 1adee47..5d7b3fe 100644
                  })
                  .await;
          });
-@@ -7383,6 +7664,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7383,6 +7674,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1301,7 +1311,7 @@ index 1adee47..5d7b3fe 100644
                  })
                  .await;
          });
-@@ -7414,6 +7696,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7414,6 +7706,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
