@@ -331,7 +331,7 @@ index 780f243..58e7d03 100644
  }
  
 diff --git a/crates/flectar-mail-core/src/net/tls.rs b/crates/flectar-mail-core/src/net/tls.rs
-index 05eae2d..325b05e 100644
+index 05eae2d..b3bcc80 100644
 --- a/crates/flectar-mail-core/src/net/tls.rs
 +++ b/crates/flectar-mail-core/src/net/tls.rs
 @@ -7,6 +7,7 @@ pub mod cert_policy;
@@ -342,7 +342,56 @@ index 05eae2d..325b05e 100644
  use rustls::client::WebPkiServerVerifier;
  use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
  use rustls::crypto::CryptoProvider;
-@@ -305,7 +306,7 @@ pub fn trusted_certificates(pem: &str) -> Result<Vec<rustls::pki_types::Certific
+@@ -151,14 +152,17 @@ struct AccountVerifier {
+ }
+ 
+ impl AccountVerifier {
+-    fn is_ca_used_as_end_entity(error: &rustls::Error) -> bool {
+-        let rustls::Error::InvalidCertificate(CertificateError::Other(other)) = error else {
+-            return false;
+-        };
+-        other
+-            .0
+-            .downcast_ref::<webpki::Error>()
+-            .is_some_and(|error| matches!(error, webpki::Error::CaUsedAsEndEntity))
++    fn ca_used_as_end_entity_or_unknown_issuer(error: &rustls::Error) -> bool {
++        match error {
++            rustls::Error::InvalidCertificate(CertificateError::Other(other)) => {
++                other
++                    .0
++                    .downcast_ref::<webpki::Error>()
++                    .is_some_and(|error| matches!(error, webpki::Error::CaUsedAsEndEntity))
++            }
++            rustls::Error::InvalidCertificate(CertificateError::UnknownIssuer) => true,
++            _ => false,
++        }
+     }
+ }
+ 
+@@ -180,16 +184,17 @@ impl ServerCertVerifier for AccountVerifier {
+         ) {
+             Ok(verified) => return Ok(verified),
+             Err(error)
+-                if Self::is_ca_used_as_end_entity(&error)
++                if Self::ca_used_as_end_entity_or_unknown_issuer(&error)
+                     && self
+                         .imported
+                         .iter()
+                         .any(|certificate| certificate.as_ref() == end_entity.as_ref()) =>
+             {
+-                // WebPKI checked validity before reporting CaUsedAsEndEntity.
+-                // Check the name separately because chain validation failed
+-                // before the standard verifier reached its name check. rustls
+-                // verifies proof of possession in verify_tls{12,13}_signature.
++                // WebPKI checked validity before reporting CaUsedAsEndEntity or
++                // UnknownIssuer.  Check the name separately because chain
++                // validation failed before the standard verifier reached its
++                // name check.  rustls verifies proof of possession in
++                // verify_tls{12,13}_signature.
+                 let certificate = rustls::server::ParsedCertificate::try_from(end_entity)?;
+                 rustls::client::verify_server_name(&certificate, server_name)?;
+                 return Ok(ServerCertVerified::assertion());
+@@ -305,7 +310,7 @@ pub fn trusted_certificates(pem: &str) -> Result<Vec<rustls::pki_types::Certific
  /// certificates the user imported for this account, respecting the given
  /// certificate [`Policy`].
  pub fn connector(pem: &str) -> Result<TlsConnector> {
@@ -351,7 +400,7 @@ index 05eae2d..325b05e 100644
  }
  
  /// Like [`connector`], but also returns a [`CapturingVerifier`] that captures
-@@ -314,25 +315,34 @@ pub fn connector(pem: &str) -> Result<TlsConnector> {
+@@ -314,25 +319,34 @@ pub fn connector(pem: &str) -> Result<TlsConnector> {
  /// handshake to obtain the certificate details for a TOFU prompt.
  pub fn connector_with_capture(
      pem: &str,
@@ -391,7 +440,7 @@ index 05eae2d..325b05e 100644
      policy: &Policy,
      capture: Option<&Arc<CapturingVerifier>>,
  ) -> Result<Arc<dyn ServerCertVerifier>> {
-@@ -343,11 +353,22 @@ fn build_policy_verifier(
+@@ -343,16 +357,37 @@ fn build_policy_verifier(
          system_verifier()
      };
  
@@ -413,10 +462,38 @@ index 05eae2d..325b05e 100644
 +        }
 +        let combined = all_pem;
 +
-+        let imported = trusted_certificates(&combined)?;
++        // Parse all certificates from both the per-account PEM and the
++        // global TOFU store, but only add CA-capable ones to the root store
++        // (non-CA certificates, such as leaf server certs, are kept in the
++        // imported list and matched by exact byte comparison in AccountVerifier).
++        use rustls::pki_types::pem::PemObject;
++        let all_certs: Vec<CertificateDer<'static>> =
++            CertificateDer::pem_slice_iter(combined.as_bytes())
++                .collect::<std::result::Result<Vec<_>, _>>()
++                .map_err(|_| CoreError::Tls(
++                    "A stored certificate is not valid PEM.".into(),
++                ))?;
          let mut roots = rustls::RootCertStore::empty();
-         for cert in &imported {
-             roots
+-        for cert in &imported {
+-            roots
+-                .add(cert.clone())
+-                .map_err(|e| CoreError::Tls(e.to_string()))?;
++        for cert in &all_certs {
++            // Silence errors for non-CA certificates; they are not trust
++            // anchors but will be matched byte-for-byte in AccountVerifier.
++            let _ = roots.add(cert.clone());
+         }
+         let imported_roots = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider())
+             .build()
+@@ -360,7 +395,7 @@ fn build_policy_verifier(
+         Arc::new(AccountVerifier {
+             system: base,
+             imported_roots,
+-            imported,
++            imported: all_certs,
+         })
+     };
+ 
 diff --git a/crates/flectar-mail-core/src/pop3/mod.rs b/crates/flectar-mail-core/src/pop3/mod.rs
 index 3428a49..e46f314 100644
 --- a/crates/flectar-mail-core/src/pop3/mod.rs
