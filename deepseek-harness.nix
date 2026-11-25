@@ -23,13 +23,13 @@ self: super: {
       # Release candidate tags exist; pinned to the most recent one.
       # Node 26 migration: nixpkgs default was nodejs_22 (below engine floor >=24.9.0).
       # rc.3 adds @deepseek-ai/dsh-terminal-panel workspace dep.
-      version = "v0.2.2-rc.4-unstable-2026-11-17";
+      version = "v0.2.3-alpha.2-unstable-2026-11-22";
 
       src = fetchFromGitHub {
         owner = "deepseek-ai";
         repo = "deepseek-harness";
-        rev = "refs/tags/dsh-v0.2.2-rc.4";
-        hash = "sha256-milWV/D6usfjicaZkOHrF904nLttAiHfMse5i1HP6/o=";
+        rev = "refs/tags/dsh-v0.2.3-alpha.2";
+        hash = "sha256-rahOnpB3BGTEg5hscD6YlRWgCRNmhW00YF0j43AuSTU=";
       };
 
       # packageManager: pnpm@11.28.5 (nixpkgs pnpm_11 lags a bit; tolerated).
@@ -58,14 +58,14 @@ self: super: {
         inherit pname version src pnpm;
         pnpmWorkspaces = [ ];
         fetcherVersion = 4;
-        hash = "sha256-md84fDBaEnqdQxlsTpaGTkGWWH1dLUGwlSp0EJ+aOA4=";
+        hash = "sha256-5eUkgQcMw6d6+yTzJMZgIYYeC/8RtfgIXnkEn+1a8HY=";
       };
 
       env.NODE_OPTIONS = "--max-old-space-size=4096";
       # fetchFromGitHub provides no .git; client-build-environment.ts reads this
       # public value instead of spawning `git rev-parse HEAD`, and its dirty
       # probe treats a missing git as "no metadata" (no dirty marker).
-      env.DSH_CLIENT_COMMIT_HASH = "3f321d32bfe382212a8ed8785c1d47a5a300aa23";
+      env.DSH_CLIENT_COMMIT_HASH = "4b399c39a6d1479cd84ca591b4d7c88e24d38a96";
 
       # `pnpm run build` (scripts/build.ts) = build:native-system (flock Node-API
       # addon; needs the node headers next to process.execPath) + build:lib (tsc
@@ -137,11 +137,10 @@ self: super: {
 
         v=$($out/bin/dsh --version)
         echo "dsh --version => $v"
+        # Any 0.x.y (plain, -rc.N or -alpha.N prerelease): this guard exists to
+        # catch a broken/placeholder build, not to audit upstream versioning.
         case "$v" in
-          0.2.2-rc.*) ;;
-          0.2.2-alpha*) ;;
-          0.2.1-rc.*) ;;
-          0.2.1-alpha*) ;;
+          0.*) ;;
           *) echo "ERROR: unexpected dsh version: $v" >&2; exit 1 ;;
         esac
         $out/bin/dsh --help > /dev/null
