@@ -4,7 +4,7 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: {
       pname = "llama-cpp-vulkan";
-      version = "unstable-2026-11-25";
+      version = "unstable-2026-11-26";
 
       # fetchGit с ref без rev невозможен в pure-mode (flake eval падает:
       # "in pure evaluation mode, 'fetchGit' doesn't fetch unlocked input"),
@@ -13,14 +13,14 @@ self: super: {
       src = fetchFromGitHub {
         owner = "ggml-org";
         repo = "llama.cpp";
-        rev = "33aeb17f85869279e3821f746bc645357139bc2c";
-        hash = "sha256-cgoP9D9uIn0gBtRGI8yDRHClC8T1f2j+K88KmaO5ypU=";
+        rev = "9c003a97ab34a69cc49243f9b02014038205ffae";
+        hash = "sha256-UpLs2cwbncRBoPR9q/dZRXJxu5F40171QXJtVJb8GdM=";
       };
 
       # Реквизиты для build-info (в tarball'е .git нет → git-ветка не сработает):
-      # 12720 = rev-list --count master на момент пина srcRev.
-      buildNumber = "12720";
-      buildCommit = "33aeb17f";
+      # 12765 = rev-list --count master на момент пина srcRev.
+      buildNumber = "12765";
+      buildCommit = "9c003a97";
 
       # -march=native не использовать: сборка идёт на удалённых билдерах,
       # целевая машина неизвестна. В Nix SOURCE_DATE_EPOCH задан, поэтому
