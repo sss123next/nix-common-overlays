@@ -784,20 +784,22 @@ index b7bc365..a6ec0d7 100644
          .map_err(Failure::into_error)?;
      let signed_in_at = now_ms();
 diff --git a/src/account_controller.rs b/src/account_controller.rs
-index 2403702..a88e09e 100644
+index 2403702..430140f 100644
 --- a/src/account_controller.rs
 +++ b/src/account_controller.rs
-@@ -455,6 +455,13 @@ pub(super) fn apply_connected_accounts(
+@@ -455,6 +455,15 @@ pub(super) fn apply_connected_accounts(
                      .server_keeps_mail_days
                      .and_then(|days| i32::try_from(days).ok())
                      .unwrap_or(-1),
-+                pinned_certificates: config
-+                    .settings
-+                    .connection
-+                    .pinned_certificates
-+                    .iter()
-+                    .map(|s| slint::SharedString::from(s.as_str()))
-+                    .collect(),
++                pinned_certificates: slint::ModelRc::new(slint::VecModel::from(
++                    config
++                        .settings
++                        .connection
++                        .pinned_certificates
++                        .iter()
++                        .map(|s| slint::SharedString::from(s.as_str()))
++                        .collect::<Vec<_>>(),
++                )),
                  calendar_connections: calendar_connection_rows(calendars),
                  provider_calendar_connected: calendars.iter().any(|connection| {
                      connection.kind != flectar_mail_core::models::CalendarConnectionKind::Generic
