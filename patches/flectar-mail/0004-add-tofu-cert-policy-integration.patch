@@ -1719,7 +1719,7 @@ index 4b17bb3..31b4c31 100644
 +            Text { text: @tr("Pinned fingerprints:"); color: AppTheme.heading; font-size: TypeScale.caption; }
 +            for fp in root.pinned-certificates : Text {
 +                text: fp;
-+                color: AppTheme.secondary; font-size: TypeScale.caption; font-family: monospace;
++                color: AppTheme.secondary; font-size: TypeScale.caption; font-family: "monospace";
 +                wrap: word-wrap; height: self.preferred-height;
 +            }
 +        }
