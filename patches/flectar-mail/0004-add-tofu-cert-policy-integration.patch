@@ -551,10 +551,58 @@ index 05eae2d..2be36d7 100644
              CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. },
          )) => "Use the server name shown on its certificate.",
 diff --git a/crates/flectar-mail-core/src/net/tls/cert_policy.rs b/crates/flectar-mail-core/src/net/tls/cert_policy.rs
-index 9599077..7cedf3f 100644
+index 9599077..f691303 100644
 --- a/crates/flectar-mail-core/src/net/tls/cert_policy.rs
 +++ b/crates/flectar-mail-core/src/net/tls/cert_policy.rs
-@@ -413,7 +413,7 @@ impl ServerCertVerifier for PinningVerifier {
+@@ -365,24 +365,35 @@ impl ServerCertVerifier for PinningVerifier {
+         ocsp_response: &[u8],
+         now: UnixTime,
+     ) -> std::result::Result<ServerCertVerified, rustls::Error> {
+-        // First, normal verification.
+-        self.inner
+-            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)?;
+-
+-        // Then pinning check.
++        // Compute the SPKI fingerprint before the pinning check so we
++        // still get a PinningError when normal verification succeeds but
++        // the cert does not match the stored pin.
+         let parsed = webpki::EndEntityCert::try_from(end_entity)
+             .map_err(|_| rustls::Error::General("cannot parse end-entity certificate for pinning".into()))?;
+         let actual = spki_fingerprint_hex(&parsed.subject_public_key_info());
+ 
++        // If the certificate matches a pinned fingerprint, accept it
++        // regardless of the normal verification result.  This allows
++        // pinning to override UnknownIssuer (self-signed, TOFU) and
++        // other trust-chain errors, and still provides the extra
++        // security of pinning on top of normal verification.
+         if self.fingerprints.iter().any(|p| p == &actual) {
+-            Ok(ServerCertVerified::assertion())
+-        } else {
+-            Err(rustls::Error::InvalidCertificate(
+-                CertificateError::Other(rustls::OtherError(Arc::new(
+-                    PinningError::new(self.fingerprints.clone(), actual),
+-                ))),
+-            ))
++            return Ok(ServerCertVerified::assertion());
+         }
++
++        // Not pinned: fall through to normal verification.  When normal
++        // verification also fails the connection is rejected with that
++        // error (e.g. UnknownIssuer); when it succeeds then the
++        // certificate did not match any stored pin, which is a pinning
++        // failure (the server's certificate changed).
++        self.inner
++            .verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)?;
++
++        Err(rustls::Error::InvalidCertificate(
++            CertificateError::Other(rustls::OtherError(Arc::new(
++                PinningError::new(self.fingerprints.clone(), actual),
++            ))),
++        ))
+     }
+ 
+     fn verify_tls12_signature(
+@@ -413,7 +424,7 @@ impl ServerCertVerifier for PinningVerifier {
  // ---------------------------------------------------------------------------
  
  #[derive(Debug)]
