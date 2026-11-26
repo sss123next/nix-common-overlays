@@ -1055,7 +1055,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5905,7 +5905,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5905,7 +5905,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1065,7 +1065,7 @@ index 1adee47..72da2d9 100644
          });
      });
  
-@@ -5974,6 +5974,97 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5974,6 +5974,101 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
  
      let app_weak = app.as_weak();
      let state_for_remote_images = Rc::clone(&state);
