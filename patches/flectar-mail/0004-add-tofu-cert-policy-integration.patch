@@ -1065,7 +1065,7 @@ index 1adee47..72da2d9 100644
          });
      });
  
-@@ -5974,6 +5974,101 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5912,6 +5913,101 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
  
      let app_weak = app.as_weak();
      let state_for_remote_images = Rc::clone(&state);
@@ -1683,7 +1683,7 @@ index 4b17bb3..31b4c31 100644
 +    // Certificate pinning (SPKI fingerprint).
 +    in property <[string]> pinned-certificates: [];
 +    in-out property <string> pin-text: root.pinned-certificates.length > 0
-+        ? @tr("Certificate pinned (SPKI): {} fingerprints") % root.pinned-certificates.length
++        ? @tr("Certificate pinned (SPKI): {} fingerprints", root.pinned-certificates.length)
 +        : "";
 +    callback remove-pin();
 +    callback pin-certificate();
@@ -1701,7 +1701,7 @@ index 4b17bb3..31b4c31 100644
 +        Button {
 +            height: 36px;
 +            text: root.pinned-certificates.length > 0
-+                ? @tr("Manage pinned certificate ({} SPKI fingerprints)") % root.pinned-certificates.length
++                ? @tr("Manage pinned certificate ({} SPKI fingerprints)", root.pinned-certificates.length)
 +                : @tr("Pin server certificate…");
 +            label-overflow: elide;
 +            enabled: root.enabled;
