@@ -1055,7 +1055,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5905,11 +5962,107 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5905,7 +5905,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1065,6 +1065,11 @@ index 1adee47..72da2d9 100644
          });
      });
  
+@@ -5974,6 +5974,97 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+ 
+     let app_weak = app.as_weak();
+     let state_for_remote_images = Rc::clone(&state);
+     let runtime_for_remote_images = runtime.clone();
 +    // --- Certificate pin / unpin callbacks ---
 +    let app_weak = app.as_weak();
 +    let state_for_pin = Rc::clone(&state);
@@ -1160,9 +1165,8 @@ index 1adee47..72da2d9 100644
 +        });
 +    });
 +
-     let app_weak = app.as_weak();
-     let state_for_remote_images = Rc::clone(&state);
-     let runtime_for_remote_images = runtime.clone();
+     let remote_images_cache_dir = platform.paths.cache_dir.clone();
+     app.on_set_remote_images(move |enabled| {
 @@ -6867,47 +7020,271 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
              };
              app.set_account_setup_in_progress(true);
