@@ -350,7 +350,7 @@ index 8955939..91f73b3 100644
          .await
      }
 diff --git a/crates/flectar-mail-core/src/models.rs b/crates/flectar-mail-core/src/models.rs
-index 780f243..58e7d03 100644
+index 953bee3..cefd1f7 100644
 --- a/crates/flectar-mail-core/src/models.rs
 +++ b/crates/flectar-mail-core/src/models.rs
 @@ -378,8 +378,18 @@ impl MailConnectionSettings {
@@ -550,6 +550,19 @@ index 05eae2d..2be36d7 100644
          Some(rustls::Error::InvalidCertificate(
              CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. },
          )) => "Use the server name shown on its certificate.",
+diff --git a/crates/flectar-mail-core/src/net/tls/cert_policy.rs b/crates/flectar-mail-core/src/net/tls/cert_policy.rs
+index 9599077..7cedf3f 100644
+--- a/crates/flectar-mail-core/src/net/tls/cert_policy.rs
++++ b/crates/flectar-mail-core/src/net/tls/cert_policy.rs
+@@ -413,7 +413,7 @@ impl ServerCertVerifier for PinningVerifier {
+ // ---------------------------------------------------------------------------
+ 
+ #[derive(Debug)]
+-struct PinningError {
++pub(crate) struct PinningError {
+     expected: Vec<String>,
+     actual: String,
+ }
 diff --git a/crates/flectar-mail-core/src/pop3/mod.rs b/crates/flectar-mail-core/src/pop3/mod.rs
 index 3428a49..e46f314 100644
 --- a/crates/flectar-mail-core/src/pop3/mod.rs
@@ -788,10 +801,10 @@ index 2403702..1df1edd 100644
                  provider_calendar_connected: calendars.iter().any(|connection| {
                      connection.kind != flectar_mail_core::models::CalendarConnectionKind::Generic
 diff --git a/src/data_controller.rs b/src/data_controller.rs
-index 991eb4d..61e4e19 100644
+index 470dcf5..6dbecec 100644
 --- a/src/data_controller.rs
 +++ b/src/data_controller.rs
-@@ -1599,6 +1599,7 @@ pub(super) fn register_data_management_callbacks(
+@@ -1600,6 +1600,7 @@ pub(super) fn register_data_management_callbacks(
                              finishes_account_setup: false,
                              finishes_oauth: false,
                              close_to_tray: None,
@@ -800,7 +813,7 @@ index 991eb4d..61e4e19 100644
                          .await;
                  });
 diff --git a/src/mail.rs b/src/mail.rs
-index c5174e8..f26d285 100644
+index 340fe6c..b1a5b82 100644
 --- a/src/mail.rs
 +++ b/src/mail.rs
 @@ -15,7 +15,7 @@ use flectar_mail_core::{
@@ -812,7 +825,7 @@ index c5174e8..f26d285 100644
      },
  };
  #[cfg(test)]
-@@ -2414,6 +2414,65 @@ impl CoreMailSource {
+@@ -2427,6 +2427,65 @@ impl CoreMailSource {
              .map_err(|error| error.to_string())
      }
  
@@ -878,7 +891,7 @@ index c5174e8..f26d285 100644
      pub async fn set_account_color(
          &self,
          account_id: i64,
-@@ -3118,6 +3177,15 @@ impl CoreMailSource {
+@@ -3131,6 +3190,15 @@ impl CoreMailSource {
              .map_err(|error| error.to_string())
      }
  
@@ -895,7 +908,7 @@ index c5174e8..f26d285 100644
          &self,
          provider: Provider,
 diff --git a/src/main.rs b/src/main.rs
-index 1adee47..72da2d9 100644
+index 22d686a..3daf1f8 100644
 --- a/src/main.rs
 +++ b/src/main.rs
 @@ -173,7 +173,8 @@ use flectar_mail_core::models::{
@@ -954,7 +967,7 @@ index 1adee47..72da2d9 100644
  }
  
  #[derive(Clone, Default)]
-@@ -5160,6 +5193,20 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5195,6 +5228,20 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
              if update.finishes_account_setup {
                  app.set_account_setup_in_progress(false);
              }
@@ -975,7 +988,7 @@ index 1adee47..72da2d9 100644
              if update.finishes_oauth {
                  app.set_oauth_in_progress(false);
                  app.set_oauth_authorization_url("".into());
-@@ -5427,6 +5474,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5462,6 +5509,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -983,7 +996,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5530,6 +5578,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5565,6 +5613,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: true,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -991,7 +1004,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5573,6 +5622,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5608,6 +5657,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -999,7 +1012,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5615,6 +5665,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5650,6 +5700,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1007,7 +1020,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5657,6 +5708,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5692,6 +5743,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1015,7 +1028,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5701,6 +5753,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5736,6 +5788,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1023,7 +1036,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5740,6 +5793,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5775,6 +5828,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1031,7 +1044,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5779,6 +5833,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5814,6 +5868,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1039,7 +1052,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5822,6 +5877,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5857,6 +5912,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1047,7 +1060,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5862,6 +5918,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5897,6 +5953,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1055,7 +1068,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -5905,7 +5905,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -5940,6 +5997,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1063,13 +1076,10 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
+@@ -5972,6 +6030,101 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+         app.set_password_cache_enabled(enabled);
      });
  
-@@ -5912,6 +5913,101 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
- 
-     let app_weak = app.as_weak();
-     let state_for_remote_images = Rc::clone(&state);
-     let runtime_for_remote_images = runtime.clone();
 +    // --- Certificate pin / unpin callbacks ---
 +    let app_weak = app.as_weak();
 +    let state_for_pin = Rc::clone(&state);
@@ -1165,9 +1175,10 @@ index 1adee47..72da2d9 100644
 +        });
 +    });
 +
-     let remote_images_cache_dir = platform.paths.cache_dir.clone();
-     app.on_set_remote_images(move |enabled| {
-@@ -6867,47 +7020,271 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+     let app_weak = app.as_weak();
+     let state_for_remote_images = Rc::clone(&state);
+     let runtime_for_remote_images = runtime.clone();
+@@ -6929,47 +7082,271 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
              };
              app.set_account_setup_in_progress(true);
              let updates = ui_task_tx_for_account.clone();
@@ -1474,7 +1485,7 @@ index 1adee47..72da2d9 100644
      let app_weak = app.as_weak();
      let state_for_oauth = Rc::clone(&state);
      let runtime_for_oauth = runtime.clone();
-@@ -6979,6 +7356,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7041,6 +7418,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                          finishes_account_setup: false,
                          finishes_oauth: true,
                          close_to_tray: None,
@@ -1482,7 +1493,7 @@ index 1adee47..72da2d9 100644
                      }
                  }
                  Err(error) => UiTaskUpdate {
-@@ -6992,6 +7370,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7054,6 +7432,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: true,
                      close_to_tray: None,
@@ -1490,7 +1501,7 @@ index 1adee47..72da2d9 100644
                  },
              };
              let _ = updates.send(update).await;
-@@ -7054,6 +7433,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7116,6 +7495,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                          finishes_account_setup: false,
                          finishes_oauth: true,
                          close_to_tray: None,
@@ -1498,7 +1509,7 @@ index 1adee47..72da2d9 100644
                      }
                  }
                  Err(error) => UiTaskUpdate {
-@@ -7067,6 +7447,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7129,6 +7509,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: true,
                      close_to_tray: None,
@@ -1506,7 +1517,7 @@ index 1adee47..72da2d9 100644
                  },
              };
              let _ = updates.send(update).await;
-@@ -7153,6 +7534,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7215,6 +7596,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: true,
                      close_to_tray: None,
@@ -1514,7 +1525,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -7193,6 +7575,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7255,6 +7637,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1522,7 +1533,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -7227,6 +7610,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7289,6 +7672,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1530,7 +1541,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -7290,6 +7674,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7352,6 +7736,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1538,7 +1549,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -7348,6 +7733,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7410,6 +7795,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1546,7 +1557,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -7383,6 +7769,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7445,6 +7831,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1554,7 +1565,7 @@ index 1adee47..72da2d9 100644
                  })
                  .await;
          });
-@@ -7414,6 +7801,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
+@@ -7476,6 +7863,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>>
                      finishes_account_setup: false,
                      finishes_oauth: false,
                      close_to_tray: None,
@@ -1587,7 +1598,7 @@ index 30d1a19..4f5ffab 100644
  }
  
 diff --git a/ui/app.slint b/ui/app.slint
-index e005952..4a8f3eb 100644
+index 0316aa1..200ef98 100644
 --- a/ui/app.slint
 +++ b/ui/app.slint
 @@ -23,6 +23,7 @@ export { Notice } from "notice.slint";
@@ -1607,7 +1618,7 @@ index e005952..4a8f3eb 100644
  import { ContactImportDialog } from "dialogs/contact-import-dialog.slint";
  import { ContactImport } from "contact-import.slint";
  import { BlockSender } from "block-sender.slint";
-@@ -1601,6 +1604,9 @@ export component AppWindow inherits Window {
+@@ -1604,6 +1607,9 @@ export component AppWindow inherits Window {
      in-out property <string> incoming_security: "tls";
      in-out property <string> smtp_security: "tls";
      in-out property <string> trusted_certificate_pem;
@@ -1617,7 +1628,7 @@ index e005952..4a8f3eb 100644
      // The account form's advanced settings (#252).
      in-out property <bool> account_sends_mail: true;
      in-out property <string> incoming_login: "automatic";
-@@ -2504,6 +2510,9 @@ export component AppWindow inherits Window {
+@@ -2508,6 +2514,9 @@ export component AppWindow inherits Window {
              incoming_security <=> root.incoming_security;
              smtp_security <=> root.smtp_security;
              trusted_certificate_pem <=> root.trusted_certificate_pem;
@@ -1627,7 +1638,7 @@ index e005952..4a8f3eb 100644
              account_sends_mail <=> root.account_sends_mail;
              incoming_login <=> root.incoming_login;
              smtp_login <=> root.smtp_login;
-@@ -2808,6 +2817,14 @@ export component AppWindow inherits Window {
+@@ -2813,6 +2822,14 @@ export component AppWindow inherits Window {
          z: 16000;
      }
  
@@ -1673,7 +1684,7 @@ index 0000000..442af54
 +    callback reject();         // Do not connect.
 +}
 diff --git a/ui/components/mail-security-fields.slint b/ui/components/mail-security-fields.slint
-index 4b17bb3..31b4c31 100644
+index 4b17bb3..4a515bf 100644
 --- a/ui/components/mail-security-fields.slint
 +++ b/ui/components/mail-security-fields.slint
 @@ -40,6 +40,13 @@ export component MailSecurityFields inherits VerticalBox {
@@ -1945,10 +1956,10 @@ index 0000000..0a3b0fc
 +    }
 +}
 diff --git a/ui/dialogs/settings-dialog.slint b/ui/dialogs/settings-dialog.slint
-index 3664f6b..c112945 100644
+index c56a0d4..67493a3 100644
 --- a/ui/dialogs/settings-dialog.slint
 +++ b/ui/dialogs/settings-dialog.slint
-@@ -577,6 +577,9 @@ export component SettingsDialog inherits Rectangle {
+@@ -578,6 +578,9 @@ export component SettingsDialog inherits Rectangle {
      in-out property <string> incoming_security: "tls";
      in-out property <string> smtp_security: "tls";
      in-out property <string> trusted_certificate_pem;
@@ -1958,7 +1969,7 @@ index 3664f6b..c112945 100644
      // The account form's advanced settings (#252).
      in-out property <bool> account_sends_mail: true;
      in-out property <string> incoming_login: "automatic";
-@@ -1178,6 +1181,7 @@ export component SettingsDialog inherits Rectangle {
+@@ -1183,6 +1186,7 @@ export component SettingsDialog inherits Rectangle {
              root.incoming_security = account.incoming_security;
              root.smtp_security = account.smtp_security;
              root.trusted_certificate_pem = account.trusted_certificate_pem;
@@ -1966,7 +1977,7 @@ index 3664f6b..c112945 100644
              root.incoming_host = account.incoming_host;
              root.incoming_port = account.incoming_port;
              root.smtp_host = account.smtp_host;
-@@ -4769,6 +4773,9 @@ export component SettingsDialog inherits Rectangle {
+@@ -4800,6 +4804,9 @@ export component SettingsDialog inherits Rectangle {
                                      sends-mail: root.account_sends_mail;
                                      certificate-pem <=> root.trusted_certificate_pem;
                                      import-certificate => { root.import_mail_certificate(); }
