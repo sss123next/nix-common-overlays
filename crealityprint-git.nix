@@ -412,7 +412,15 @@ endif()' \
       # ещё не обзавёлся сокетом; 2) после deleteHistory список не перезапраши-
       # вается. Докидываем перезапросы, перехватив WebSocket страницы (в 7.3.2
       # она открывает сокет сама, ws_proxy ей не нужен) — см. комментарий в файле.
-      cat ${./crealityprint-git/device-page-request-history.html} >> resources/web/deviceMgr/index.html
+      # Вставляем перед </body>, а не в конец файла (после </html> скрипт
+      # может игнорироваться WebView, ломая рендеринг страницы — например,
+      # блок управления LED подсветкой камеры перестаёт отображаться).
+      sed -i '/<\/body>/{
+        r '${./crealityprint-git/device-page-request-history.html}'
+        a\
+</body>
+        d
+      }' resources/web/deviceMgr/index.html
 
       # --- переводы, как ./run_gettext.sh в официальной сборке ---
       # wx ищет resources/i18n/<lang>/CrealityPrint.mo; без него диалоги

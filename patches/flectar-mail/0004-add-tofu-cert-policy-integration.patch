@@ -46,7 +46,7 @@ index d2f8c39..c3124ac 100644
          "imaps"
      } else {
 diff --git a/crates/flectar-mail-core/src/lib.rs b/crates/flectar-mail-core/src/lib.rs
-index 8955939..91f73b3 100644
+index 8955939..f14c3bd 100644
 --- a/crates/flectar-mail-core/src/lib.rs
 +++ b/crates/flectar-mail-core/src/lib.rs
 @@ -447,7 +447,7 @@ fn password_account_config(args: &AddPasswordAccountArgs, id: i64) -> AccountCon
@@ -143,7 +143,7 @@ index 8955939..91f73b3 100644
      /// The folders an IMAP account's roles such as Sent go to, with the one
      /// each goes to unless one is chosen, the one chosen by hand, and the
      /// folders a role can go to (#252).
-@@ -2327,43 +2389,28 @@ impl Core {
+@@ -2327,43 +2389,40 @@ impl Core {
  
      /// Try to capture the server's untrusted certificate for a TOFU dialog,
      /// after the real connection already failed.
@@ -174,13 +174,6 @@ index 8955939..91f73b3 100644
 -        let failed = capture.take_captured()?;
 -
 -        let info = CertificateInfo::from_der(&failed.end_entity, &failed.to_pem_bundle()).ok()?;
--
--        Some(UntrustedCertificate {
--            host: failed.host,
--            pem: info.pem,
--            sha256_fingerprint: info.sha256_fingerprint,
--            spki_sha256_fingerprint: info.spki_sha256_fingerprint,
--        })
 +        let tofu = self
 +            .get_settings()
 +            .await
@@ -188,6 +181,24 @@ index 8955939..91f73b3 100644
 +            .map(|s| s.known_certificates.clone())
 +            .unwrap_or_default();
 +        capture_untrusted_certificate(&args, &tofu).await
++    }
+ 
+-        Some(UntrustedCertificate {
+-            host: failed.host,
+-            pem: info.pem,
+-            sha256_fingerprint: info.sha256_fingerprint,
+-            spki_sha256_fingerprint: info.spki_sha256_fingerprint,
+-        })
++    /// Like [`capture_tls_certificate`] but ignores any globally-trusted
++    /// certificates (the TOFU store), so the handshake always fails and the
++    /// server's raw certificate is captured.  Used for pinning, where we want
++    /// the server's actual SPKI fingerprint regardless of prior trust.
++    pub async fn capture_tls_certificate_untrusted(
++        &self,
++        args: AddPasswordAccountArgs,
++    ) -> Option<UntrustedCertificate> {
++        let empty_tofu = std::collections::HashMap::new();
++        capture_untrusted_certificate(&args, &empty_tofu).await
      }
  
      pub async fn test_connection(&self, args: &AddPasswordAccountArgs) -> ConnectionTestResult {
@@ -202,7 +213,7 @@ index 8955939..91f73b3 100644
          let result = match args.mail_protocol {
              MailProtocol::Jmap => crate::jmap::client::connect_with(
                  &args.email,
-@@ -2376,11 +2423,11 @@ impl Core {
+@@ -2376,11 +2435,11 @@ impl Core {
              .map(|_| ())
              .map_err(|error| error.to_client_json()),
              MailProtocol::Imap => self
@@ -216,7 +227,7 @@ index 8955939..91f73b3 100644
                  .await
                  .map(drop)
                  .map_err(|error| error.to_string()),
-@@ -2398,7 +2445,7 @@ impl Core {
+@@ -2398,7 +2457,7 @@ impl Core {
                  // TOFU dialog.  This connects a second time with a capturing
                  // verifier; it is best-effort and may also fail (the port
                  // could be wrong, the server may have timed out, etc.).
@@ -225,7 +236,7 @@ index 8955939..91f73b3 100644
                  ConnectionTestResult {
                      ok: false,
                      error: Some(error),
-@@ -2409,8 +2456,14 @@ impl Core {
+@@ -2409,8 +2468,14 @@ impl Core {
      }
  
      /// Checks the servers of a new account, or of account `id` being edited.
@@ -241,7 +252,7 @@ index 8955939..91f73b3 100644
          let mut session = with_username_fallback(
              args,
              owner,
-@@ -2425,6 +2478,7 @@ impl Core {
+@@ -2425,6 +2490,7 @@ impl Core {
                      args.incoming_port,
                      creds,
                      &args.connection,
@@ -249,7 +260,7 @@ index 8955939..91f73b3 100644
                  )
                  .await
              },
-@@ -2434,7 +2488,7 @@ impl Core {
+@@ -2434,7 +2500,7 @@ impl Core {
          let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
          imap::logout(session).await;
          mailbox_result?;
@@ -258,7 +269,7 @@ index 8955939..91f73b3 100644
      }
  
      /// Returns what the POP3 server announced, which the first sync has to
-@@ -2443,13 +2497,15 @@ impl Core {
+@@ -2443,13 +2509,15 @@ impl Core {
          &self,
          args: &mut AddPasswordAccountArgs,
          id: i64,
@@ -276,7 +287,7 @@ index 8955939..91f73b3 100644
          Ok(probe)
      }
  
-@@ -2614,6 +2670,15 @@ impl Core {
+@@ -2614,6 +2682,15 @@ impl Core {
          let mut pop3_probe = None;
          // The checks wait as long as the account's server timeout says (#252).
          let server_timeout = args.connection.server_timeout();
@@ -292,7 +303,7 @@ index 8955939..91f73b3 100644
          let jmap_account_id = match args.mail_protocol {
              MailProtocol::Jmap => Some(
                  net::timeouts::scope(
-@@ -2631,18 +2696,20 @@ impl Core {
+@@ -2631,18 +2708,20 @@ impl Core {
                  .account_id,
              ),
              MailProtocol::Imap => {
@@ -322,7 +333,7 @@ index 8955939..91f73b3 100644
                  None
              }
              MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
-@@ -5796,6 +5863,11 @@ impl Core {
+@@ -5796,6 +5875,11 @@ impl Core {
              .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))
      }
  
@@ -334,7 +345,7 @@ index 8955939..91f73b3 100644
      async fn folder_for_child(
          &self,
          account_id: i64,
-@@ -5835,12 +5907,14 @@ impl Core {
+@@ -5835,12 +5919,14 @@ impl Core {
                  access_token: self.tokens.access_token(config.id, config.provider).await?,
              },
          };
@@ -754,14 +765,24 @@ index 1bde3ef..afe41bf 100644
          .command(Noop)
          .await
 diff --git a/crates/flectar-mail-core/src/sync/engine.rs b/crates/flectar-mail-core/src/sync/engine.rs
-index 29b6bc0..674c406 100644
+index 29b6bc0..e38a2ec 100644
 --- a/crates/flectar-mail-core/src/sync/engine.rs
 +++ b/crates/flectar-mail-core/src/sync/engine.rs
-@@ -1832,12 +1832,14 @@ pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Ses
+@@ -1832,12 +1832,24 @@ pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Ses
      crate::events::sync_diagnostic("imap_credentials", Some(config.id), "loading");
      let creds = imap_credentials(ctx, config).await?;
      crate::events::sync_diagnostic("imap_connect", Some(config.id), "connecting");
-+    let empty_tofu = HashMap::new();
++    // Load the global TOFU store so previously-accepted certificates
++    // (AcceptAlways) are trusted during sync.
++    let tofu: HashMap<String, String> = ctx
++        .db
++        .read(|conn| {
++            repo::settings::get(conn)
++                .ok()
++                .map(|s| s.known_certificates)
++                .unwrap_or_default()
++        })
++        .await;
      match imap::connect_as(
          config.proxy_owner(),
          &config.incoming_host,
@@ -772,16 +793,16 @@ index 29b6bc0..674c406 100644
      )
      .await
      {
-@@ -1862,6 +1864,7 @@ pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Ses
+@@ -1862,6 +1874,7 @@ pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Ses
                  config.incoming_port,
                  creds,
                  &config.settings.connection,
-+                &empty_tofu,
++                &tofu,
              )
              .await
          }
 diff --git a/crates/flectar-mail-core/src/sync/pop3.rs b/crates/flectar-mail-core/src/sync/pop3.rs
-index b7bc365..a6ec0d7 100644
+index b7bc365..9bb64bd 100644
 --- a/crates/flectar-mail-core/src/sync/pop3.rs
 +++ b/crates/flectar-mail-core/src/sync/pop3.rs
 @@ -360,6 +360,7 @@ async fn load_password(
@@ -811,23 +832,39 @@ index b7bc365..a6ec0d7 100644
          .await
          .map_err(Failure::into_error)?;
      let signed_in_at = now_ms();
-@@ -445,7 +447,8 @@ async fn sync(
+@@ -445,7 +447,16 @@ async fn sync(
          return Ok(Synced::NotBefore(at));
      }
      let password = load_password(ctx, config).await?;
 -    let mut session = connect(config, &password).await?;
-+    let empty_tofu = std::collections::HashMap::new();
-+    let mut session = connect(config, &password, &empty_tofu).await?;
++    let tofu: HashMap<String, String> = ctx
++        .db
++        .read(|conn| {
++            repo::settings::get(conn)
++                .ok()
++                .map(|s| s.known_certificates)
++                .unwrap_or_default()
++        })
++        .await;
++    let mut session = connect(config, &password, &tofu).await?;
      set_state(ctx, account_id, "syncing").await;
      let signed_in_at = now_ms();
      let capabilities = session.capabilities().clone();
-@@ -998,7 +1001,8 @@ async fn restore(ctx: &SyncCtx, config: &AccountConfig, message_id: i64) -> Resu
+@@ -998,7 +1009,16 @@ async fn restore(ctx: &SyncCtx, config: &AccountConfig, message_id: i64) -> Resu
      let password = load_password(ctx, config)
          .await
          .map_err(Failure::into_error)?;
 -    let mut session = connect(config, &password)
-+    let empty_tofu = std::collections::HashMap::new();
-+    let mut session = connect(config, &password, &empty_tofu)
++    let tofu: HashMap<String, String> = ctx
++        .db
++        .read(|conn| {
++            repo::settings::get(conn)
++                .ok()
++                .map(|s| s.known_certificates)
++                .unwrap_or_default()
++        })
++        .await;
++    let mut session = connect(config, &password, &tofu)
          .await
          .map_err(Failure::into_error)?;
      let signed_in_at = now_ms();
@@ -864,7 +901,7 @@ index 470dcf5..6dbecec 100644
                          .await;
                  });
 diff --git a/src/mail.rs b/src/mail.rs
-index 340fe6c..b1a5b82 100644
+index 340fe6c..3c151b5 100644
 --- a/src/mail.rs
 +++ b/src/mail.rs
 @@ -15,7 +15,7 @@ use flectar_mail_core::{
@@ -876,7 +913,7 @@ index 340fe6c..b1a5b82 100644
      },
  };
  #[cfg(test)]
-@@ -2427,6 +2427,65 @@ impl CoreMailSource {
+@@ -2427,6 +2427,72 @@ impl CoreMailSource {
              .map_err(|error| error.to_string())
      }
  
@@ -909,6 +946,11 @@ index 340fe6c..b1a5b82 100644
 +
 +        // Build minimal args for capture (no password needed — capture only
 +        // connects and performs the TLS handshake without authenticating).
++        // Clear the trusted_certificate_pem so the capture forces a
++        // verification failure even if the account previously accepted
++        // the certificate (TOFU / AcceptAlways).
++        let mut connection = config.settings.connection.clone();
++        connection.trusted_certificate_pem = String::new();
 +        let args = flectar_mail_core::models::AddPasswordAccountArgs {
 +            email: config.email.clone(),
 +            display_name: None,
@@ -921,13 +963,15 @@ index 340fe6c..b1a5b82 100644
 +            smtp_host: config.smtp_host.clone(),
 +            smtp_port: config.smtp_port,
 +            smtp_password: None,
-+            connection: config.settings.connection.clone(),
++            connection,
 +        };
 +
-+        // Capture the certificate from the server (no authentication needed).
++        // Capture the certificate from the server using an untrusted capture
++        // that ignores the global TOFU store, so we always get the server's
++        // raw certificate even if it was previously accepted globally.
 +        let cert = self
 +            .core
-+            .capture_tls_certificate(args)
++            .capture_tls_certificate_untrusted(args)
 +            .await
 +            .ok_or_else(|| "Could not capture the server's certificate. The server may be unreachable or the connection failed differently.".to_string())?;
 +
@@ -942,7 +986,7 @@ index 340fe6c..b1a5b82 100644
      pub async fn set_account_color(
          &self,
          account_id: i64,
-@@ -3131,6 +3190,15 @@ impl CoreMailSource {
+@@ -3131,6 +3197,15 @@ impl CoreMailSource {
              .map_err(|error| error.to_string())
      }
  
