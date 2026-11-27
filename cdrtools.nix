@@ -6,7 +6,7 @@ self: super: {
       version = "git";
       src = fetchGit {
         url = "https://codeberg.org/schilytools/schilytools";
-        ref = "master";
+        rev = "e835e64f0d84a614b3c8d619ac646060ea6922a5";
       };
     });
 }
