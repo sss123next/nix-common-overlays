@@ -58,6 +58,16 @@ self: super: {
       # Cargo.toml already has strip = "symbols" in [profile.release];
       dontStrip = true;
 
+      # New nixpkgs cargo-setup-hook (cargoUseSystemLibs, preConfigure) exports
+      # AWS_LC_SYS_USE_SYSTEM=1, which makes the vendored aws-lc-sys 0.44 build
+      # script panic ("requires a system-installed AWS-LC, but none was found"):
+      # it probes OPENSSL_DIR, rejects plain OpenSSL (no include/openssl/base.h)
+      # and dies. Flectar vendors AWS-LC sources and built them happily before
+      # that hook existed, so opt out of the whole system-libs hint set (the old
+      # builds never had it). Drop when the vendored aws-lc-sys learns to use
+      # pkgs.aws-lc, or the hook learns not to export for non-AWS-LC probes.
+      dontCargoUseSystemLibs = true;
+
       doCheck = false;
 
       # xkbcommon-dl dlopen()s libxkbcommon-x11.so at runtime. Following
