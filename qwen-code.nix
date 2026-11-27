@@ -45,7 +45,16 @@ self: super: {
 
       # Upstream now sets MAX_DOCUMENT_RUNTIME_BYTES = 2_132_000 (>= our 2_100_000 patch);
       # the web-templates+budget patch is no longer needed.
-      patches = [ ];
+      #
+      # Web Shell's auto-recap effect is gated only on the daemon's `session_recap`
+      # capability, which the daemon announces unconditionally, so
+      # general.showSessionRecap = false (the default, and the switch the TUI honours
+      # in useAwaySummary) did nothing in the browser: returning to a background tab
+      # after 3 minutes spent a side-query on the recap model. The patch reads that
+      # setting from /workspace/settings -- served because showInDialog is true -- and
+      # skips the visibilitychange handler unless it is on. Manual recap is untouched.
+      # Drop when upstream gates the effect on the setting instead of the capability.
+      patches = [ ./patches/qwen-code-web-shell-autorecap.patch ];
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
       # the desktop-relay process identity probe). /bin/ps does not exist on NixOS, so the ACP

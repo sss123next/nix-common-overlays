@@ -1,0 +1,32 @@
+--- a/packages/web-shell/client/App.tsx
++++ b/packages/web-shell/client/App.tsx
+@@ -15714,6 +15714,13 @@
+     workspaceSettings.find(
+       (setting) => setting.key === 'worktree.defaultForNewSessions',
+     )?.values.effective === true;
++  // Downstream patch: the auto-recap effect further down is gated only on the
++  // `session_recap` capability, so Web Shell kept recapping for users who
++  // turned `general.showSessionRecap` off. Drop once upstream honours it.
++  const autoRecapEnabled =
++    workspaceSettings.find(
++      (setting) => setting.key === 'general.showSessionRecap',
++    )?.values.effective === true;
+   const handleGitModeIntentChange = useCallback((intent: SessionGitIntent) => {
+     gitModeIntentTouchedRef.current = true;
+     gitModeIntentRef.current = intent;
+@@ -17226,6 +17233,7 @@
+   useEffect(() => {
+     // OpenAPI and Managed hosts may not expose the daemon's recap route.
+     if (!connection.capabilities?.features.includes('session_recap')) return;
++    if (!autoRecapEnabled) return;
+     const AWAY_THRESHOLD_MS = 3 * 60 * 1000;
+     const MIN_NEW_BLOCKS = 4;
+     function onVisibilityChange() {
+@@ -17296,6 +17304,7 @@
+     return () =>
+       document.removeEventListener('visibilitychange', onVisibilityChange);
+   }, [
++    autoRecapEnabled,
+     connection.capabilities,
+     connection.sessionId,
+     sessionActions,
