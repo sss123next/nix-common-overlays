@@ -20,7 +20,8 @@ self: super: {
 
     nativeBuildInputs = with super; [ pkg-config asciidoctor installShellFiles ];
 
-    buildInputs = with super; [ curl.dev openssl.dev ];
+    # onig_sys (через syntect) ищет oniguruma.pc через pkg-config.
+    buildInputs = with super; [ curl.dev openssl.dev oniguruma ];
 
     postInstall = ''
       ln -sr $out/bin/{mdcat,mdless}
