@@ -61,6 +61,15 @@ self: super: {
         hash = "sha256-5eUkgQcMw6d6+yTzJMZgIYYeC/8RtfgIXnkEn+1a8HY=";
       };
 
+      # Honour $SHELL in LocalBashExecutor.execute() and
+      # SandboxBashExecutor.confine() so that setting SHELL to
+      # sandbox-shell (cgroup + bwrap isolation) takes effect for
+      # the Shell tool.
+      patches = [
+        ./patches/dsh-bash-local.patch
+        ./patches/dsh-bash-sandbox.patch
+      ];
+
       env.NODE_OPTIONS = "--max-old-space-size=4096";
       # fetchFromGitHub provides no .git; client-build-environment.ts reads this
       # public value instead of spawning `git rev-parse HEAD`, and its dirty

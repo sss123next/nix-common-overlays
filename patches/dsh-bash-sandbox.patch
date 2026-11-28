@@ -1,0 +1,13 @@
+diff --git a/packages/shell/bash-sandbox/src/index.ts b/packages/shell/bash-sandbox/src/index.ts
+index 1cf112d309..a75be0b856 100644
+--- a/packages/shell/bash-sandbox/src/index.ts
++++ b/packages/shell/bash-sandbox/src/index.ts
+@@ -185,7 +185,7 @@ export class SandboxBashExecutor extends LocalBashExecutor {
+    * @returns the provider's exact argv and settlement-classification facts.
+    */
+   private confine(command: string, policy: SandboxPolicy, signal?: AbortSignal): Promise<ConfinedArgv> {
+-    return this.ctx.sandbox.confine(['bash', '-c', command], policy, signal)
++    return this.ctx.sandbox.confine(process.env['SHELL'] ? [process.env['SHELL'], '-c', command] : ['bash', '-c', command], policy, signal)
+   }
+ }
+ 

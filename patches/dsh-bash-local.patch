@@ -1,0 +1,13 @@
+diff --git a/packages/shell/bash-local/src/index.ts b/packages/shell/bash-local/src/index.ts
+index 54002a64aa..f6712ee5b0 100644
+--- a/packages/shell/bash-local/src/index.ts
++++ b/packages/shell/bash-local/src/index.ts
+@@ -185,7 +185,7 @@ export class LocalBashExecutor extends ShellExecutor {
+   }
+ 
+   async execute(spec: ShellExecSpec): Promise<ShellExecution> {
+-    return this.executeArgv(spec, ['bash', '-c', spec.command])
++    return this.executeArgv(spec, process.env['SHELL'] ? [process.env['SHELL'], '-c', spec.command] : ['bash', '-c', spec.command])
+   }
+ 
+   /**
