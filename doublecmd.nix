@@ -1,6 +1,8 @@
-# Double Commander — форк derivation из nixpkgs master (v1.2.11) с исправлениями:
-#   * lua5_4 вместо lua5_5: src/platform/lua.pas поддерживает Lua 5.1–5.4,
-#     в 5.5 часть 5.1-совместимых символов вырезана — lua-колонки/wfx-плагины
+# Double Commander — форк derivation из nixpkgs, трекает upstream master
+# (rev-pinned snapshot, 1.3.0 dev после релиза 1.2.11). Исправления:
+#   * lua5_4 вместо lua5_5: src/platform/lua.pas использует чистый Lua 5.1 API
+#     (lua_objlen / luaL_register / LUA_GLOBALSINDEX / luaL_checkint — все живы
+#     и на master), в 5.4+/5.5 эти символы вырезаны — lua-колонки и wfx-плагины
 #     на lua5_5 молча не загружаются.
 #   * strictDeps — корректный изолированный closure сборки.
 # Остальное — как в upstream nixpkgs (derivation оттуда и был взят за основу).
@@ -13,13 +15,14 @@ in
 {
   doublecmd = super.stdenv.mkDerivation (finalAttrs: {
     pname = "doublecmd";
-    version = "1.2.11";
+    # upstream master (rev-пinned ниже); .lpi VersionInfo: 1.3 pre-release.
+    version = "1.3.0-unstable-2026-11-28";
 
     src = super.fetchFromGitHub {
       owner = "doublecmd";
       repo = "doublecmd";
-      tag = "v${finalAttrs.version}";
-      hash = "sha256-pl/0YmZxPZfb+nubzig9DmyGonvnitVPr5f4n8ll3Bs=";
+      rev = "491ff2dc9acb498dbe77023a2d003d2acd660f14";
+      hash = "sha256-PybEbOCxIMDTxXa8mETjn51tXmLCtfTM0m904D1O90M=";
     };
 
     strictDeps = true;
