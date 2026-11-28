@@ -53,7 +53,7 @@ final: prev: rec {
         });
       afdko =
         with python-prev;
-        uvloop.overridePythonAttrs (old: rec {
+        afdko.overridePythonAttrs (old: rec {
           doCheck = false; # Disable tests
           doInstallCheck = false; # Disable install checks
           checkPhase = "";
