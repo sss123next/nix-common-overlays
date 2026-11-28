@@ -4,14 +4,14 @@ self: super: {
     with super;
     stdenv.mkDerivation (finalAttrs: rec {
       pname = "qwen-code";
-      version = "0.28.7-unstable-2026-11-28";
+      version = "0.29.0-unstable-2026-11-28";
 
       src = fetchFromGitHub {
         owner = "QwenLM";
         repo = "qwen-code";
         # main @ 2026-11-28
-        rev = "c2a77d3f82fd4709366066a2f7e4f5e44b36f5e5";
-        sha256 = "sha256-QhBUcfY2VivwNsZJJyea0sC6MyFn/EkYSAo8vdDHvBM=";
+        rev = "8d46d0e4b54edd8384f2b02a49725a13dd40dcc4";
+        sha256 = "sha256-1UOcjHpsT4khPTCJDnD8egdIklyj+fLGBk+UNDpwlfo=";
       };
 
       # v0.24.x switched from npm to pnpm (pnpm-lock.yaml, lockfileVersion 9):
