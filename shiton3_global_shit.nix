@@ -51,6 +51,13 @@ final: prev: rec {
           doInstallCheck = false; # Disable install checks
           checkPhase = "";
         });
+      afdko =
+        with python-prev;
+        uvloop.overridePythonAttrs (old: rec {
+          doCheck = false; # Disable tests
+          doInstallCheck = false; # Disable install checks
+          checkPhase = "";
+        });
       pyopenssl =
         with python-prev;
         pyopenssl.overridePythonAttrs (old: rec {
