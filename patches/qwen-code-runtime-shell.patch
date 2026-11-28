@@ -1,0 +1,13 @@
+diff --git a/packages/core/src/sandbox/runtime-shell.ts b/packages/core/src/sandbox/runtime-shell.ts
+index 43dd30ac4f..d68eb7fbfc 100644
+--- a/packages/core/src/sandbox/runtime-shell.ts
++++ b/packages/core/src/sandbox/runtime-shell.ts
+@@ -62,7 +62,7 @@ export function executeRuntimeShell(
+     );
+     return executeSandbox(
+       policy,
+-      { executable: '/bin/bash', args: ['-c', command], cwd, env },
++      { executable: process.env['SHELL'] || '/bin/bash', args: ['-c', command], cwd, env },
+       onOutput,
+       signal,
+       usePty,

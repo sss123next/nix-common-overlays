@@ -54,7 +54,15 @@ self: super: {
       # setting from /workspace/settings -- served because showInDialog is true -- and
       # skips the visibilitychange handler unless it is on. Manual recap is untouched.
       # Drop when upstream gates the effect on the setting instead of the capability.
-      patches = [ ./patches/qwen-code-web-shell-autorecap.patch ];
+      patches = [
+        ./patches/qwen-code-web-shell-autorecap.patch
+        # Honour $SHELL in getShellConfiguration() so that setting SHELL to
+        # sandbox-shell (cgroup + bwrap isolation) takes effect for the Shell tool.
+        ./patches/qwen-code-shell-utils.patch
+        # Honour $SHELL in executeRuntimeShell() so that the sandbox code path
+        # (bwrap/Landlock) also respects the configured shell.
+        ./patches/qwen-code-runtime-shell.patch
+      ];
 
       # Upstream hardcodes '/bin/ps' (packages/acp-bridge/src/process-registry.ts POSIX_PS, and
       # the desktop-relay process identity probe). /bin/ps does not exist on NixOS, so the ACP

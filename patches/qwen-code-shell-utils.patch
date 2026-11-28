@@ -1,0 +1,15 @@
+diff --git a/packages/core/src/utils/shell-utils.ts b/packages/core/src/utils/shell-utils.ts
+index 368fcb4841..c95fa30d6e 100644
+--- a/packages/core/src/utils/shell-utils.ts
++++ b/packages/core/src/utils/shell-utils.ts
+@@ -227,6 +227,10 @@ export function getShellConfiguration(): ShellConfiguration {
+       shell: 'cmd',
+     };
+   }
++  const userShell = process.env['SHELL'];
++  if (userShell) {
++    return { executable: userShell, argsPrefix: ['-c'], shell: 'bash' };
++  }
+ 
+   // Unix-like systems (Linux, macOS)
+   return { executable: 'bash', argsPrefix: ['-c'], shell: 'bash' };
