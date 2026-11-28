@@ -41,7 +41,14 @@ in
       super.libx11
       super.libssh2
     ]
-    ++ super.lib.optional (!super.stdenv.hostPlatform.isDarwin) super.libsForQt5.libqtpas;
+    # Qt5 platform plugins (xcb/wayland/…) живут в отдельном `bin`-output qtbase;
+    # libqtpas пропагирует только `out` (libs), поэтому без plugins-output в
+    # closure приложение падает: Could not find the Qt platform plugin "xcb".
+    # См. postFixup (qt.conf рядом с настоящим бинарём).
+    ++ super.lib.optionals (!super.stdenv.hostPlatform.isDarwin) [
+      super.libsForQt5.libqtpas
+      super.libsForQt5.qtbase.bin
+    ];
 
     env.NIX_LDFLAGS = super.lib.optionalString super.stdenv.hostPlatform.isLinux "--as-needed -rpath ${super.lib.makeLibraryPath finalAttrs.buildInputs}";
 
@@ -115,6 +122,19 @@ in
       }
 
       runHook postInstall
+    '';
+
+    postFixup = super.lib.optionalString (!super.stdenv.hostPlatform.isDarwin) ''
+      # Qt5 platform plugins (xcb/wayland) лежат в отдельном bin-output qtbase,
+      # который libqtpas не пропагирует, а wrapQtAppsHook не оборачивает
+      # bin/doublecmd (крошечный launcher, не линкует libQt5*) -> без путей к
+      # плагинам abort 'Could not find the Qt platform plugin "xcb"'.
+      # Кладём qt.conf рядом с настоящим бинарём (lib/doublecmd/doublecmd): Qt
+      # читает его до загрузки QPA и берёт плагины из version-matched bin-output.
+      mkdir -p "$out/lib/doublecmd"
+      printf '[Paths]\nPlugins = %s\n' \
+        "$(echo ${super.libsForQt5.qtbase.bin}/lib/qt-*/plugins)" \
+        > "$out/lib/doublecmd/qt.conf"
     '';
 
     meta = with super.lib; {
